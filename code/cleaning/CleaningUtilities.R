@@ -57,7 +57,7 @@ GetPossessions = function(df, agg=FALSE) {
   # while not perfect, offers a pretty good estimation of
   # the number of possessions in a game
   
-  simpleplaytypes = read.csv('Data Cleaning/shottypessimple.csv')
+  simpleplaytypes = read.csv('./shottypessimple.csv')
   
   df = df %>%
     mutate(across(type_id, as.integer),
