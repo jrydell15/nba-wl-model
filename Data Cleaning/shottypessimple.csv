@@ -1,0 +1,136 @@
+type_id,type_text,simple_text
+0,Not Available,NA
+7,No Violation,NA
+8,Delay of Game,Delay of Game
+9,Defensive Goaltending,Defensive Goaltending
+10,Lane,Lane
+11,Jump Ball,Jump Ball
+12,Kicked Ball,Kicked Ball
+13,Double Lane,Double Lane
+16,Full Timeout,Timeout
+22,Personal Take Foul,Foul
+24,Offensive Charge,Foul
+25,Excess Timeout Technical,Timeout
+28,Delay Technical,Foul
+29,Defensive 3-Seconds Technical,Foul
+30,Double Technical Foul,Foul
+31,Flagrant Foul Type 2,Foul
+32,Flagrant Foul Type 1,Foul
+33,Hanging Technical Foul,Foul
+35,Technical Foul,Foul
+36,Double Personal Foul,Foul
+37,Clear Path Foul,Foul
+38,Punching Foul,Foul
+40,Away from Play Foul,Foul
+42,Offensive Foul,Foul
+43,Loose Ball Foul,Foul
+44,Shooting Foul,Foul
+45,Personal Foul,Foul
+46,No Foul,No Foul
+47,Too Many Players Technical,Foul
+61,No Turnover,No Turnover
+62,"Bad Pass
+Turnover",Turnover
+63,Lost Ball Turnover,Turnover
+64,Traveling,Turnover
+65,Double Dribble Turnover,Turnover
+66,Disc Dribble Turnover,Turnover
+67,3-Second Turnover,Turnover
+68,5-Second Turnover,Turnover
+69,8-Second Turnover,Turnover
+70,Shot Clock Turnover,Turnover
+71,Inbound Turnover,Turnover
+72,Back Court Turnover,Turnover
+73,Offensive Goaltending Turnover,Turnover
+74,Lane Violation Turnover,Turnover
+75,Jumpball Violation Turnover,Turnover
+76,Kicked Ball Turnover,Turnover
+77,Illegal Assist Turnover,Turnover
+78,Palming Turnover,Turnover
+80,Punched Ball Turnover,Turnover
+81,Swinging Elbows Turnover,Turnover
+82,Basket from Below Turnover,Turnover
+84,Offensive Foul Turnover,Turnover
+86,Out of Bounds - Step Turnover,Turnover
+87,Out of Bounds - Lost Ball Turnover,Turnover
+88,Excess Timeout Turnover,Turnover
+89,Too Many Players Turnover,Turnover
+90,Out of Bounds - Bad Pass Turnover,Turnover
+91,No Shot (Default Shot),No Shot (Default Shot)
+92,Jump Shot,Jump
+93,Hook Shot,Hook
+94,Tip Shot,Tip
+95,Layup Shot,Layup
+96,Dunk Shot,Dunk
+97,Free Throw - 1 of 1,Free Throw
+98,Free Throw - 1 of 2,Free Throw
+99,Free Throw - 2 of 2,Free Throw
+100,Free Throw - 1 of 3,Free Throw
+101,Free Throw - 2 of 3,Free Throw
+102,Free Throw - 3 of 3,Free Throw
+103,Free Throw - Technical,Free Throw
+104,Free Throw - Flagrant 1 of 2,Free Throw
+105,Free Throw - Flagrant 2 of 2,Free Throw
+106,Free Throw - Flagrant 1 of 1,Free Throw
+107,Free Throw - Clear Path 1 of 2,Free Throw
+108,Free Throw - Clear Path 2 of 2,Free Throw
+109,Running Layup Shot,Layup
+110,Driving Layup Shot,Layup
+111,Alley Oop Layup Shot,Layup
+112,Reverse Layup Shot,Layup
+113,Running Jump Shot,Jump
+114,Turnaround Jump Shot,Jump
+115,Driving Dunk Shot,Dunk
+116,Running Dunk Shot,Dunk
+117,Reverse Dunk Shot,Dunk
+118,Alley Oop Dunk Shot,Dunk
+119,Driving Hook Shot,Hook
+120,Turnaround Hook Shot,Hook
+121,Fade Away Jump Shot,Jump
+122,Jump Shot Bank,Jump
+123,Hook Shot Bank,Hook
+124,Finger Roll Layup,Layup
+125,Layup Shot Putback,Layup
+126,Layup Driving Reverse,Layup
+127,Layup Running Reverse,Layup
+128,Driving Finger Roll Layup,Layup
+129,Running Finger Roll Layup,Layup
+130,Floating Jump Shot,Jump
+131,Pullup Jump Shot,Jump
+132,Step Back Jump Shot,Jump
+133,Pullup Bank Jump Shot,Jump
+134,Driving Jump Shot Bank,Jump
+135,Fade Away Bank Jump Shot,Jump
+136,Turnaround Bank Jump Shot,Jump
+137,Turnaround Fade Away Jump Shot,Jump
+138,Putback Dunk Shot,Dunk
+139,Hook Driving Bank,Hook
+140,Hook Turnaround Bank,Hook
+141,Cutting Layup Shot,Layup
+142,Cutting Finger Roll Layup Shot,Layup
+143,Running Alley Oop Layup Shot,Layup
+144,Driving Floating Jump Shot,Jump
+145,Driving Floating Bank Jump Shot,Jump
+146,Running Pullup Jump Shot,Jump
+147,Step Back Bank Jump Shot,Jump
+148,Turnaround Fadeaway Bank Jump Shot,Jump
+149,Running Alley Oop Dunk Shot,Dunk
+150,Tip Dunk Shot,Dunk
+151,Cutting Dunk Shot,Dunk
+152,Driving Reverse Dunk Shot,Dunk
+153,Running Reverse Dunk Shot,Dunk
+155,Defensive Rebound,Rebound
+156,Offensive Rebound,Rebound
+157,Free Throw - Flagrant 1 of 3,Free Throw
+165,Free Throw - Flagrant 2 of 3,Free Throw
+166,Free Throw - Flagrant 3 of 3,Free Throw
+206,5-Second Back to the Basket Turnover,Turnover
+213,Challenge,Challenge
+214,Coach's Challenge (Supported),Challenge
+215,Coach's Challenge (Overturned),Challenge
+216,Coach's Challenge (Stands),Challenge
+402,End Game,End Game
+412,End Period,End Period
+517,Ejection,Ejection
+584,Substitution,Substitution
+615,Jumpball,Jumpball
