@@ -244,3 +244,31 @@ AddLineupsToPBP = function(g_id, pbp=load_nba_pbp(), playerbox=load_nba_player_b
            fill(home_lineup, away_lineup) %>%
            select(game_id, sequence_number, home_lineup, away_lineup))
 }
+
+PlayerIDToPlayerName = function(g_id, df, playerbox) {
+  # inputs: -g_id: game_id
+  #         -df: df after being run through AddLineupsToPBP()
+  #         -playerbox: player box score df (output of load_nba_player_box())
+  # output: df with game_id, sequence_number, home_lineup, away_lineup (player names instead of player ids)
+  # usage: newdf = PlayerIDToPlayerName(game_id, df, playerbox)
+  #
+  # recommendation: pre-load the pbp and playerbox and feed them into the function
+  #                 if pulling multiple games. Only use defaults if you're pulling
+  #                 a one-off game.
+  
+  df = df %>% filter(game_id == g_id)
+  
+  return(df %>%
+           separate(home_lineup, paste0("home_", 1:5), ', ') %>%
+           separate(away_lineup, paste0("away_", 1:5), ', ') %>%
+           gather(key='team', value='athlete_id', home_1:away_5) %>%
+           mutate(team = ifelse(grepl("home", team), "home_lineup", "away_lineup")) %>%
+           left_join(playerbox %>%
+                       distinct(athlete_id, athlete_display_name, game_id),
+                     by=c("game_id", "athlete_id")) %>%
+           group_by(game_id, sequence_number, team) %>%
+           summarize(lineup = paste0(athlete_display_name, collapse=', '),
+                     .groups='keep') %>%
+           ungroup() %>%
+           spread(team, lineup))
+}
