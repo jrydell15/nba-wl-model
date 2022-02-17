@@ -57,7 +57,7 @@ GetPossessions = function(df, agg=FALSE) {
   # while not perfect, offers a pretty good estimation of
   # the number of possessions in a game
   
-  simpleplaytypes = read.csv('./shottypessimple.csv')
+  simpleplaytypes = read.csv('./code/cleaning/shottypessimple.csv')
   
   df = df %>%
     mutate(across(type_id, as.integer),
@@ -165,21 +165,33 @@ idToTeamName = function(df, teamsdf=espn_nba_teams()) {
            select(team, names(df), -team_id))
 }
 
-GetStandings = function(box=load_nba_team_box()) {
+GetStandings = function(box=NA, year=most_recent_nba_season()) {
   # inputs: -box: df output of load_nba_team_box()
   # output: 30x3 tibble (team, wins, losses)
   # usage: df = GetStandings()
+  
+  if (is.null(dim(box))) {
+    box = load_nba_team_box(year)
+  }
   
   return(box %>% 
            left_join(box %>%
                        GetGameWinners(.),
                      by="game_id") %>%
-           mutate(winner = ifelse(home_away == "HOME", home_win, !home_win)) %>%
+           mutate(winner = ifelse(home_away == "HOME", home_win, !home_win),
+                  across(team_id, as.integer)) %>%
+           filter(season_type == 2,
+                  team_id < 1000) %>%
+           group_by(team_id) %>%
+           mutate(teamgamenum = row_number()) %>%
+           ungroup() %>%
+           filter(teamgamenum <= 82) %>%
            group_by(team_id) %>%
            summarize(wins = sum(winner),
                      totalGames = n(),
                      losses = totalGames - wins) %>%
            ungroup() %>%
+           mutate(across(team_id, as.character)) %>%
            idToTeamName(.) %>%
            select(team, wins, losses) %>%
            arrange(-wins))
