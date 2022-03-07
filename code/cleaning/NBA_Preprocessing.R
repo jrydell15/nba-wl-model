@@ -65,3 +65,82 @@ ggplot_missing <- function(x){
          y = "Rows / observations")
 }
 ggplot_missing(nba_team_box)
+
+#Show the structure of data and how many unique levels in each variables.
+rbind(sapply(nba_team_box,function(x){ length(unique(x))}),
+        sapply(nba_team_box,class))
+str(nba_team_box)
+
+#Look at the data of only Celtics vs Rocket
+team_box_BostonVsHouston = nba_team_box %>% 
+  filter(., team_abbreviation == "BOS" & opponent_abbrev == "HOU")
+ggplot_missing(team_box_BostonVsHouston)
+
+rbind(sapply(team_box_BostonVsHouston,function(x){ length(unique(x))}),
+      sapply(team_box_BostonVsHouston,class))
+
+#Separate the goals make and goals attempted
+
+tempFieldGoals = 
+        sapply(team_box_BostonVsHouston$field_goals_made_field_goals_attempted, 
+        strsplit, split = "-") %>% 
+        unlist() %>% 
+        matrix(., ncol = 2, byrow = TRUE)%>%
+        data.frame()
+
+names(tempFieldGoals) = c("field_goals", "field_goals_attempted")
+
+temp3Points = 
+        sapply(team_box_BostonVsHouston$three_point_field_goals_made_three_point_field_goals_attempted, 
+        strsplit, split = "-") %>% 
+        unlist() %>% 
+        matrix(., ncol = 2, byrow = TRUE)%>%
+        data.frame()
+
+names(temp3Points) = c("three_points", "three_points_attempted")
+
+tempFreeThrows = 
+        sapply(team_box_BostonVsHouston$free_throws_made_free_throws_attempted, 
+        strsplit, split = "-") %>% 
+        unlist() %>% 
+        matrix(., ncol = 2, byrow = TRUE)%>%
+        data.frame()   
+
+names(tempFreeThrows) = c("free_throws", "free_throws_attempted")
+
+## Select the remaining quantitative features
+BostonVsHouston_quanData = team_box_BostonVsHouston %>%
+  select(field_goal_pct,
+         three_point_field_goal_pct,
+         free_throw_pct,
+         total_rebounds,
+         offensive_rebounds,
+         defensive_rebounds,
+         assists,
+         steals,
+         blocks,
+         turnovers,
+         team_turnovers,
+         total_turnovers,
+         technical_fouls,
+         total_technical_fouls,
+         flagrant_fouls,
+         turnover_points,
+         fast_break_points,
+         points_in_paint,
+         fouls)
+
+BostonVsHouston_quanData = bind_cols(BostonVsHouston_quanData,
+                                      tempFieldGoals,
+                                      temp3Points,
+                                      tempFreeThrows)
+
+## Covert all characters to numeric
+BostonVsHouston_quanData = as.data.frame(sapply(BostonVsHouston_quanData,
+                                                 as.numeric))
+
+## Plot the correlation plot of all numeric features
+## There is some issue with the "point_in_paint" feature (lots of "-1")
+## And there is lots of missing values in "largest_lead" featur
+## Need to evaluate
+corrplot(cor(BostonVsHouston_quanData), tl.cex = 0.8)
