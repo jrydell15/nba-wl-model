@@ -12,3 +12,6 @@ pbp_noGarbageTime = FilterGarbageTime(pbp, playerBox)
 adv = AggregateAdvanced(pbp_noGarbageTime, box)
 
 #rm(list=c("pbp", "box", "pbp_noGarbageTime", "playerBox"))
+
+# need to add steals and blocks to the garbage time stats
+View(adv)

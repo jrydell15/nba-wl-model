@@ -423,7 +423,8 @@ SetPBPAdvanced = function(pbp) {
   return(pbp %>%
            FixShotLocations(.) %>%
            GetPossessions(.) %>%
-           select(shooting_play, game_id, sequence_number, team_id, event, shot_amount, new_poss) %>%
+           select(shooting_play, game_id, sequence_number, type_text = type_text.x,
+                  team_id, event, shot_amount, new_poss, p1 = participants_0_athlete_id) %>%
            group_by(game_id) %>%
            mutate(aggposs = cumsum(new_poss)) %>%
            ungroup() %>%
@@ -435,13 +436,17 @@ SetPBPAdvanced = function(pbp) {
                   ft = ifelse(event == "Free Throw", 1, 0),
                   turnover = ifelse(event == "Turnover", 1, 0),
                   threePoint = ifelse(shot_amount == 3, 1, 0),
-                  shot = ifelse(shooting_play == TRUE & event != "Free Throw", 1, 0)) %>%
+                  shot = ifelse(shooting_play == TRUE & event != "Free Throw", 1, 0),
+                  oReb = ifelse(type_text == "Offensive Rebound" & !is.na(p1), 1, 0),
+                  dReb = ifelse(type_text == "Defensive Rebound" & !is.na(p1), 1, 0)) %>%
            group_by(game_id, aggposs, team_id) %>%
            summarize(morey = sum(morey),
                      ft = sum(ft),
                      turnover = sum(turnover),
                      threePoint = sum(threePoint, na.rm=TRUE),
                      shots = sum(shot, na.rm=TRUE),
+                     oReb = sum(oReb),
+                     dReb = sum(dReb),
                      .groups='keep') %>%
            ungroup() %>%
            mutate(across(team_id, as.character)))
@@ -456,6 +461,8 @@ AggregateAdvanced = function(pbp, box=load_nba_team_box()) {
               to_o = sum(turnover),
               theePoint_o = sum(threePoint),
               totalShots_o = sum(shots),
+              oReb_o = sum(oReb),
+              dReb_o = sum(dReb),
               .groups='keep') %>%
     ungroup() %>%
     mutate(across(team_id, as.character)) %>%
