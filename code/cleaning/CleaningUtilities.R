@@ -118,17 +118,59 @@ GetStarters = function(g_id, playerbox=load_nba_player_box()) {
            ungroup())
 }
 
-SortLineup = function(lineupString) {
-  # inputs: -lineupString: comma separated string of the lineup ids
-  # output: sorted lineup string (small -> large)
-  #
-  # purpose: so that it will be easy to aggregate lineup data later
+GetStartersLeftInGame = function(pbp, playerbox) {
+  starters = GetStarters(playerbox) %>%
+    group_by(game_id) %>%
+    summarize(allStarters = paste0(lineup, collapse=', ')) %>%
+    distinct() %>%
+    ungroup()
   
-  return(lineupString %>%
-           strsplit(', ') %>%
-           sapply(., as.integer) %>%
-           sort() %>%
-           paste0(., collapse=', '))
+  return(AddLineupsToPBP(pbp, playerbox) %>%
+           left_join(starters, by="game_id") %>%
+           rowwise() %>%
+           mutate(allLineup = paste0(c(lineup_away, lineup_home), collapse=', '),
+                  nStarters = sum(as.integer(unlist(strsplit(allLineup, ', '))) %in% as.integer(unlist(strsplit(allStarters, ', '))))) %>%
+           ungroup() %>%
+           select(game_id, sequence_number, nStarters))
+}
+
+GetStartOfGarbageTime = function(pbp, playerbox) {
+  startersLeftdf = GetStartersLeftInGame(pbp, playerbox)
+  
+  return(pbp %>% 
+           select(game_id, sequence_number, home_score, away_score, qtr, clock_minutes) %>%
+           left_join(startersLeftdf, by=c("game_id", "sequence_number")) %>% 
+           filter(qtr == 4) %>%
+           group_by(game_id) %>%
+           mutate(scoreDiff = abs(away_score - home_score),
+                  scoreFilter = ifelse(qtr == 4, 
+                                       ifelse(clock_minutes > 8 & scoreDiff >= 25,
+                                              1,
+                                              ifelse(clock_minutes > 5 & scoreDiff >= 20,
+                                                     1,
+                                                     ifelse(scoreDiff >= 10,
+                                                            1, 0))),
+                                       0),
+                  garbageTime = ifelse(scoreFilter == 1 & nStarters <= 2, 1, 0),
+                  across(sequence_number, as.integer)) %>%
+           arrange(-sequence_number) %>%
+           mutate(lastGarbageTime = lead(garbageTime)) %>%
+           filter(garbageTime == 1, lastGarbageTime == 0) %>%
+           filter(sequence_number == max(sequence_number)) %>%
+           select(game_id, startOfGarbage = sequence_number) %>%
+           ungroup() %>%
+           mutate(across(startOfGarbage, as.character)))
+}
+
+FilterGarbageTime = function(pbp, playerbox) {
+  return(pbp %>%
+           left_join(GetStartOfGarbageTime(pbp, playerbox), by='game_id') %>%
+           mutate(across(sequence_number, as.integer),
+                  across(startOfGarbage, as.integer)) %>%
+           mutate(garb = ifelse(sequence_number >= startOfGarbage, 1, 0)) %>%
+           filter(garb == 0) %>%
+           select(-c("startOfGarbage", "garb")) %>%
+           mutate(across(sequence_number, as.character)))
 }
 
 GetGameWinners = function(df) {
@@ -185,9 +227,8 @@ GetStandings = function(box=load_nba_team_box()) {
            arrange(-wins))
 }
 
-AddLineupsToPBP = function(g_id, pbp=load_nba_pbp(), playerbox=load_nba_player_box()) {
-  # inputs: -g_id: game_id
-  #         -pbp: pbp df (output of load_nba_pbp())
+AddLineupsToPBP = function(pbp=load_nba_pbp(), playerbox=load_nba_player_box()) {
+  # inputs: -pbp: pbp df (output of load_nba_pbp())
   #         -playerbox: player box score df (output of load_nba_player_box())
   # output: df with game_id, sequence_number, home_lineup, away_lineup
   # usage: newdf = AddLineupsToPBP(game_id, pbp, playerbox)
@@ -196,51 +237,67 @@ AddLineupsToPBP = function(g_id, pbp=load_nba_pbp(), playerbox=load_nba_player_b
   #                 if pulling multiple games. Only use defaults if you're pulling
   #                 a one-off game.
   
-  game = pbp %>%
-    filter(game_id == g_id)
+  starterdf = GetStarters(playerbox)
   
-  gamestarters = GetStarters(g_id, playerbox)
-  
-  lineupdf = game %>% filter(type_text == "Substitution") %>%
+  lineupdf = pbp %>%
+    mutate(across(sequence_number, as.integer)) %>%
+    arrange(sequence_number) %>%
+    filter(type_text == "Substitution") %>%
     select(game_id, team_id, sequence_number, text,
            player_in = participants_0_athlete_id,
            player_out = participants_1_athlete_id) %>%
+    group_by(game_id) %>%
     mutate(event_number = row_number()) %>%
+    ungroup() %>%
     group_by(game_id, team_id) %>%
     transmute(sequence_number, text, player_in,
               player_out, event_number,
               sub_event = row_number(),
-              lineup = '')
+              lineup = "")
   
-  for (i in 1:max(lineupdf$event_number)) {
-    if ((lineupdf[[i, 'sub_event']] == 1)) {
-      lineupdf[[i, 'lineup']] = lineupdf %>%
-        filter(event_number == i) %>%
-        left_join(gamestarters, by=c("game_id", "team_id")) %>%
-        mutate(newlineup = str_replace(lineup.y, player_out, player_in)) %>%
-        pull(newlineup) %>%
-        SortLineup(.)
-    } else {
-      lineupdf[[i, 'lineup']] = lineupdf %>%
-        filter(event_number == i |
-                 sub_event == (lineupdf %>% filter(event_number == i) %>% pull(sub_event)) - 1,
-               team_id == (lineupdf %>% filter(event_number == i) %>% pull(team_id))) %>%
-        mutate(newlineup = str_replace(lag(lineup), player_out, player_in)) %>%
-        filter(event_number == i) %>%
-        pull(newlineup) %>%
-        SortLineup(.)
-    }
+  lineupdf = lineupdf %>%
+    left_join(starterdf, by=c("game_id", "team_id"), suffix=c("", "_old")) %>%
+    mutate(across(sub_event, as.integer)) %>%
+    arrange(game_id, team_id, sub_event) %>%
+    rowwise() %>%
+    mutate(lineup_old = ifelse(sub_event == 1, lineup_old, lag(lineup)),
+           lineup = str_replace(lineup_old, player_out, player_in)) %>%
+    ungroup()
+  
+  for (i in 2:max(lineupdf$sub_event)) {
+    lineupdf[lineupdf[,"sub_event"] == i, 'lineup'] = lineupdf %>%
+      filter(sub_event %in% c(i-1, i)) %>%
+      mutate(lineup_old = lag(lineup),
+             lineup = str_replace(lineup_old, player_out, player_in)) %>%
+      ungroup() %>%
+      filter(sub_event == i) %>% pull(lineup)
   }
   
-  return(game %>% 
-           select(game_id, team_id, sequence_number, away_team_id, home_team_id, type_text) %>%
-           mutate(home_lineup = ifelse(row_number() == 1, (gamestarters %>% filter(team_id == (game %>% filter(row_number() == 1) %>% pull(home_team_id))) %>% pull(lineup)), NA),
-                  away_lineup = ifelse(row_number() == 1, (gamestarters %>% filter(team_id == (game %>% filter(row_number() == 1) %>% pull(away_team_id))) %>% pull(lineup)), NA)) %>%
-           left_join(lineupdf, by=c("game_id", "team_id", "sequence_number")) %>%
-           select(-c(player_in:event_number, text)) %>%
-           mutate(home_lineup = ifelse(team_id == home_team_id & !is.na(lineup), lineup, home_lineup),
-                  away_lineup = ifelse(team_id == away_team_id & !is.na(lineup), lineup, away_lineup),
+  switches = lineupdf %>%
+    rowwise() %>%
+    mutate(lineup = paste0(sort(sapply(strsplit(lineup, ', '), as.integer)), collapse=', ')) %>%
+    ungroup() %>%
+    select(game_id, team_id, sequence_number, lineup)
+  
+  return(pbp %>%
+           select(game_id, team_id, sequence_number,
+                  team_id_away = away_team_id,
+                  team_id_home = home_team_id,
+                  type_text) %>%
+           mutate(across(team_id_away, as.character),
+                  across(team_id_home, as.character),
                   across(sequence_number, as.integer)) %>%
-           fill(home_lineup, away_lineup) %>%
-           select(game_id, sequence_number, home_lineup, away_lineup))
+           left_join(switches, by=c("game_id", "sequence_number", "team_id_away" = "team_id")) %>%
+           left_join(switches, by=c("game_id", "sequence_number", "team_id_home" = "team_id"), suffix=c("", "_home")) %>%
+           rename(lineup_away = lineup) %>%
+           left_join(starterdf, by=c("game_id", "team_id_away" = "team_id")) %>%
+           left_join(starterdf, by=c("game_id", "team_id_home" = "team_id"), suffix=c("", "_home_start")) %>%
+           rename(lineup_away_start = lineup) %>%
+           group_by(game_id) %>%
+           mutate(lineup_away = ifelse(row_number() == 1, lineup_away_start, lineup_away),
+                  lineup_home = ifelse(row_number() == 1, lineup_home_start, lineup_home)) %>%
+           fill(lineup_away, lineup_home) %>%
+           ungroup() %>%
+           select(game_id, sequence_number, lineup_away, lineup_home) %>%
+           mutate(across(sequence_number, as.character)))
 }
