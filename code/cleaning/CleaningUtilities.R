@@ -57,7 +57,7 @@ GetPossessions = function(df, agg=FALSE) {
   # while not perfect, offers a pretty good estimation of
   # the number of possessions in a game
   
-  simpleplaytypes = read.csv('./shottypessimple.csv')
+  simpleplaytypes = read.csv('./code/cleaning/shottypessimple.csv')
   
   df = df %>%
     mutate(across(type_id, as.integer),
@@ -106,7 +106,8 @@ GetStarters = function(playerbox=load_nba_player_box()) {
   return(playerbox %>% 
            filter(starter == TRUE) %>%
            select(players = athlete_id, team_id, game_id) %>%
-           mutate(across(players, as.integer)) %>%
+           mutate(across(players, as.integer),
+                  across(team_id, as.character)) %>%
            arrange(game_id, team_id, players) %>%
            group_by(game_id, team_id) %>%
            summarize(lineup = paste0(players, collapse = ', '),
@@ -129,7 +130,8 @@ GetStartersLeftInGame = function(pbp, playerbox) {
            mutate(allLineup = paste0(c(lineup_away, lineup_home), collapse=', '),
                   nStarters = sum(as.integer(unlist(strsplit(allLineup, ', '))) %in% as.integer(unlist(strsplit(allStarters, ', '))))) %>%
            ungroup() %>%
-           select(game_id, sequence_number, nStarters))
+           select(game_id, sequence_number, nStarters) %>%
+           mutate(across(sequence_number, as.character)))
 }
 
 GetStartOfGarbageTime = function(pbp, playerbox) {
@@ -137,6 +139,7 @@ GetStartOfGarbageTime = function(pbp, playerbox) {
   
   return(pbp %>% 
            select(game_id, sequence_number, home_score, away_score, qtr, clock_minutes) %>%
+           mutate(across(sequence_number, as.character)) %>%
            left_join(startersLeftdf, by=c("game_id", "sequence_number")) %>% 
            filter(qtr == 4) %>%
            group_by(game_id) %>%
@@ -166,7 +169,7 @@ FilterGarbageTime = function(pbp, playerbox) {
            mutate(across(sequence_number, as.integer),
                   across(startOfGarbage, as.integer)) %>%
            mutate(garb = ifelse(sequence_number >= startOfGarbage, 1, 0)) %>%
-           filter(garb == 0) %>%
+           filter(garb == 0 | is.na(garb)) %>%
            select(-c("startOfGarbage", "garb")) %>%
            mutate(across(sequence_number, as.character)))
 }
@@ -291,10 +294,11 @@ AddLineupsToPBP = function(pbp=load_nba_pbp(), playerbox=load_nba_player_box()) 
     transmute(sequence_number, text, player_in,
               player_out, event_number,
               sub_event = row_number(),
-              lineup = "")
+              lineup = "") %>%
+    mutate(across(player_in:player_out, as.character))
   
   lineupdf = lineupdf %>%
-    left_join(starterdf, by=c("game_id", "team_id"), suffix=c("", "_old")) %>%
+    left_join(starterdf %>% mutate(across(team_id, as.integer)), by=c("game_id", "team_id"), suffix=c("", "_old")) %>%
     mutate(across(sub_event, as.integer)) %>%
     arrange(game_id, team_id, sub_event) %>%
     rowwise() %>%
@@ -315,7 +319,8 @@ AddLineupsToPBP = function(pbp=load_nba_pbp(), playerbox=load_nba_player_box()) 
     rowwise() %>%
     mutate(lineup = paste0(sort(sapply(strsplit(lineup, ', '), as.integer)), collapse=', ')) %>%
     ungroup() %>%
-    select(game_id, team_id, sequence_number, lineup)
+    select(game_id, team_id, sequence_number, lineup) %>%
+    mutate(across(team_id, as.character))
   
   return(pbp %>%
            select(game_id, team_id, sequence_number,
@@ -410,14 +415,15 @@ GetTeamPossessions = function(pbp) {
   
   return(switchTeam %>%
            left_join(switchTeam, by=c("game_id", "team_id" = "opp_id")) %>%
-           select(game_id, team_id, poss_o = oPoss.x, poss_d = oPoss.y))
+           select(game_id, team_id, poss_o = oPoss.x, poss_d = oPoss.y) %>%
+           mutate(across(team_id, as.character)))
 }
 
 SetPBPAdvanced = function(pbp) {
   return(pbp %>%
            FixShotLocations(.) %>%
            GetPossessions(.) %>%
-           select(game_id, sequence_number, team_id, event, shot_amount, new_poss) %>%
+           select(shooting_play, game_id, sequence_number, team_id, event, shot_amount, new_poss) %>%
            group_by(game_id) %>%
            mutate(aggposs = cumsum(new_poss)) %>%
            ungroup() %>%
@@ -428,12 +434,14 @@ SetPBPAdvanced = function(pbp) {
                                  1, 0),
                   ft = ifelse(event == "Free Throw", 1, 0),
                   turnover = ifelse(event == "Turnover", 1, 0),
-                  threePoint = ifelse(shot_amount == 3, 1, 0)) %>%
+                  threePoint = ifelse(shot_amount == 3, 1, 0),
+                  shot = ifelse(shooting_play == TRUE & event != "Free Throw", 1, 0)) %>%
            group_by(game_id, aggposs, team_id) %>%
-           summarize(morey = ifelse(sum(morey) > 0, 1, 0),
-                     ft = ifelse(sum(ft) > 0, 1, 0),
-                     turnover = ifelse(sum(turnover) > 0, 1, 0),
-                     threePoint = ifelse(sum(threePoint, na.rm = TRUE) > 0, 1, 0),
+           summarize(morey = sum(morey),
+                     ft = sum(ft),
+                     turnover = sum(turnover),
+                     threePoint = sum(threePoint, na.rm=TRUE),
+                     shots = sum(shot, na.rm=TRUE),
                      .groups='keep') %>%
            ungroup() %>%
            mutate(across(team_id, as.character)))
@@ -447,6 +455,7 @@ AggregateAdvanced = function(pbp, box=load_nba_team_box()) {
               ft_o = sum(ft),
               to_o = sum(turnover),
               theePoint_o = sum(threePoint),
+              totalShots_o = sum(shots),
               .groups='keep') %>%
     ungroup() %>%
     mutate(across(team_id, as.character)) %>%
@@ -454,7 +463,7 @@ AggregateAdvanced = function(pbp, box=load_nba_team_box()) {
     rename(., opponent_id = team_id.y)
   
   return(leftdf %>%         
-           left_join(leftdf,
+           left_join(leftdf %>% mutate(across(opponent_id, as.character)),
                      by=c("game_id", "team_id"="opponent_id"),
                      suffix = c("", ".y")) %>%
            select(-team_id.y) %>%
