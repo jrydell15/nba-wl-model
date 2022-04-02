@@ -1,5 +1,6 @@
 if(!require(hoopR)) {install.packages("hoopR"); require(hoopR)}
 if(!require(tidyverse)) {install.packages("tidyverse"); require(tidyverse)}
+require(here)
 
 FixShotLocations = function(df) {
   # input:   raw pbp dataframe
@@ -16,23 +17,27 @@ FixShotLocations = function(df) {
   
   df = df %>%
     mutate(coordinate_x = coordinate_x - 25,
-           dist_from_basket = sqrt(coordinate_x^2 + coordinate_y^2),
-           shot_amount = ifelse(shooting_play == TRUE, 0, NA))
+           raw_y = coordinate_y,
+           coordinate_y = coordinate_y + 5.25,
+           dist_from_basket = sqrt(coordinate_x^2 + raw_y^2),
+           shot_amount = ifelse(shooting_play == TRUE, 0, NA),
+           pitp = ifelse(shooting_play == TRUE, 0, NA))
   
   dfthrees = df %>%
-    filter(abs(coordinate_x) < 50, shooting_play == TRUE) %>%
-    filter(dist_from_basket >= 23.75 | (coordinate_y < 14 & abs(coordinate_x) >= 22)) %>%
+    filter(!str_detect(type_text, 'Free Throw'), shooting_play == TRUE) %>%
+    filter(dist_from_basket >= 23.75 | (raw_y < 14 & abs(coordinate_x) >= 22)) %>%
     mutate(shot_amount = 3)
   
   dffts = df %>%
-    filter(abs(coordinate_x) > 100, shooting_play == TRUE) %>%
+    filter(str_detect(type_text, 'Free Throw'), shooting_play == TRUE) %>%
     mutate(shot_amount = 1)
   
   dftwos = df %>%
-    filter(abs(coordinate_x) < 50, shooting_play == TRUE) %>%
-    filter((coordinate_y < 14 & abs(coordinate_x) < 22) | (dist_from_basket < 23.75 & coordinate_y >= 14),
+    filter(!str_detect(type_text, 'Free Throw'), shooting_play == TRUE) %>%
+    filter((raw_y < 14 & abs(coordinate_x) < 22) | (dist_from_basket < 23.75 & raw_y >= 14),
            !str_detect(text, "three point")) %>%
-    mutate(shot_amount = 2)
+    mutate(shot_amount = 2,
+           pitp = ifelse(coordinate_y <= 18.8 & abs(coordinate_x) <= 8, 1, pitp))
   
   df = df %>%
     filter(shooting_play == FALSE) %>%
@@ -57,7 +62,8 @@ GetPossessions = function(df, agg=FALSE) {
   # while not perfect, offers a pretty good estimation of
   # the number of possessions in a game
   
-  simpleplaytypes = read.csv('./code/cleaning/shottypessimple.csv')
+  simpleplaytypes = read.csv(here('code/cleaning/shottypessimple.csv'))
+
   
   df = df %>%
     mutate(across(type_id, as.integer),
@@ -98,37 +104,80 @@ GetPossessions = function(df, agg=FALSE) {
   }
 }
 
-GetStarters = function(g_id, playerbox=load_nba_player_box()) {
+GetStarters = function(playerbox=load_nba_player_box()) {
   # inputs: -playerbox: df of player box scores (output of load_nba_player_box())
-  #         -g_id: game_id
   # output: 2x2 tibble of team_id and lineup (comma separated list of athlete_id's)
   # usage: teamStarters = GetStarters(playerbox, g_id)  
   
   return(playerbox %>% 
-           filter(starter == TRUE,
-                  game_id == g_id) %>%
+           filter(starter == TRUE) %>%
            select(players = athlete_id, team_id, game_id) %>%
-           mutate(across(players, as.integer)) %>%
+           mutate(across(players, as.integer),
+                  across(team_id, as.character)) %>%
            arrange(game_id, team_id, players) %>%
-           group_by(team_id) %>%
-           summarize(lineup = paste0(players, collapse=', '),
+           group_by(game_id, team_id) %>%
+           summarize(lineup = paste0(players, collapse = ', '),
                      game_id = game_id,
                      .groups = 'keep') %>%
            distinct() %>%
            ungroup())
 }
 
-SortLineup = function(lineupString) {
-  # inputs: -lineupString: comma separated string of the lineup ids
-  # output: sorted lineup string (small -> large)
-  #
-  # purpose: so that it will be easy to aggregate lineup data later
+GetStartersLeftInGame = function(pbp, playerbox) {
+  starters = GetStarters(playerbox) %>%
+    group_by(game_id) %>%
+    summarize(allStarters = paste0(lineup, collapse=', ')) %>%
+    distinct() %>%
+    ungroup()
   
-  return(lineupString %>%
-           strsplit(', ') %>%
-           sapply(., as.integer) %>%
-           sort() %>%
-           paste0(., collapse=', '))
+  return(AddLineupsToPBP(pbp, playerbox) %>%
+           left_join(starters, by="game_id") %>%
+           rowwise() %>%
+           mutate(allLineup = paste0(c(lineup_away, lineup_home), collapse=', '),
+                  nStarters = sum(as.integer(unlist(strsplit(allLineup, ', '))) %in% as.integer(unlist(strsplit(allStarters, ', '))))) %>%
+           ungroup() %>%
+           select(game_id, sequence_number, nStarters) %>%
+           mutate(across(sequence_number, as.character)))
+}
+
+GetStartOfGarbageTime = function(pbp, playerbox) {
+  startersLeftdf = GetStartersLeftInGame(pbp, playerbox)
+  
+  return(pbp %>% 
+           select(game_id, sequence_number, home_score, away_score, qtr, clock_minutes) %>%
+           mutate(across(sequence_number, as.character)) %>%
+           left_join(startersLeftdf, by=c("game_id", "sequence_number")) %>% 
+           filter(qtr == 4) %>%
+           group_by(game_id) %>%
+           mutate(scoreDiff = abs(away_score - home_score),
+                  scoreFilter = ifelse(qtr == 4, 
+                                       ifelse(clock_minutes > 8 & scoreDiff >= 25,
+                                              1,
+                                              ifelse(clock_minutes > 5 & scoreDiff >= 20,
+                                                     1,
+                                                     ifelse(scoreDiff >= 10,
+                                                            1, 0))),
+                                       0),
+                  garbageTime = ifelse(scoreFilter == 1 & nStarters <= 2, 1, 0),
+                  across(sequence_number, as.integer)) %>%
+           arrange(-sequence_number) %>%
+           mutate(lastGarbageTime = lead(garbageTime)) %>%
+           filter(garbageTime == 1, lastGarbageTime == 0) %>%
+           filter(sequence_number == max(sequence_number)) %>%
+           select(game_id, startOfGarbage = sequence_number) %>%
+           ungroup() %>%
+           mutate(across(startOfGarbage, as.character)))
+}
+
+FilterGarbageTime = function(pbp, playerbox) {
+  return(pbp %>%
+           left_join(GetStartOfGarbageTime(pbp, playerbox), by='game_id') %>%
+           mutate(across(sequence_number, as.integer),
+                  across(startOfGarbage, as.integer)) %>%
+           mutate(garb = ifelse(sequence_number >= startOfGarbage, 1, 0)) %>%
+           filter(garb == 0 | is.na(garb)) %>%
+           select(-c("startOfGarbage", "garb")) %>%
+           mutate(across(sequence_number, as.character)))
 }
 
 GetGameWinners = function(df) {
@@ -148,6 +197,33 @@ GetGameWinners = function(df) {
            spread(home_away, score) %>%
            mutate(home_win = ifelse(AWAY > HOME, 0, 1)) %>%
            select(game_id, home_win))
+}
+
+GetGameScores = function(pbp, box) {
+  # input: -pbp: dataframe of pbp (output of load_nba_pbp())
+  #        -box: dataframe of team box (output of load_nba_team_box())
+  # output: n x 4 tibble of game_id, team_id, score_o, score_d
+  # usage: scoredf = GetGameWinners(pbp)
+  
+  combo = pbp %>%
+    group_by(game_id) %>%
+    filter(row_number() == max(row_number())) %>%
+    select(game_id, team_id=home_team_id, score=home_score) %>%
+    distinct() %>%
+    rbind(pbp %>%
+            group_by(game_id) %>%
+            filter(row_number() == max(row_number())) %>%
+            select(game_id, team_id=away_team_id, score=away_score) %>%
+            distinct()) %>%
+    arrange(game_id) %>%
+    mutate(across(team_id, as.character)) 
+  
+  return(combo %>%
+           left_join(GetOpponent(box), by=c("game_id", "team_id")) %>%
+           left_join(combo, by=c("game_id", "opponent_id" = "team_id"),
+                     suffix=c("_o", "_d")) %>%
+           select(-opponent_id) %>%
+           ungroup())
 }
 
 idToTeamName = function(df, teamsdf=espn_nba_teams()) {
@@ -194,12 +270,12 @@ GetStandings = function(box=NA, year=most_recent_nba_season()) {
            mutate(across(team_id, as.character)) %>%
            idToTeamName(.) %>%
            select(team, wins, losses) %>%
-           arrange(-wins))
+           arrange(-wins) %>%
+           mutate(winPct = wins/(wins+losses)))
 }
 
-AddLineupsToPBP = function(g_id, pbp=load_nba_pbp(), playerbox=load_nba_player_box()) {
-  # inputs: -g_id: game_id
-  #         -pbp: pbp df (output of load_nba_pbp())
+AddLineupsToPBP = function(pbp=load_nba_pbp(), playerbox=load_nba_player_box()) {
+  # inputs: -pbp: pbp df (output of load_nba_pbp())
   #         -playerbox: player box score df (output of load_nba_player_box())
   # output: df with game_id, sequence_number, home_lineup, away_lineup
   # usage: newdf = AddLineupsToPBP(game_id, pbp, playerbox)
@@ -208,53 +284,71 @@ AddLineupsToPBP = function(g_id, pbp=load_nba_pbp(), playerbox=load_nba_player_b
   #                 if pulling multiple games. Only use defaults if you're pulling
   #                 a one-off game.
   
-  game = pbp %>%
-    filter(game_id == g_id)
+  starterdf = GetStarters(playerbox)
   
-  gamestarters = GetStarters(g_id, playerbox)
-  
-  lineupdf = game %>% filter(type_text == "Substitution") %>%
+  lineupdf = pbp %>%
+    mutate(across(sequence_number, as.integer)) %>%
+    arrange(sequence_number) %>%
+    filter(type_text == "Substitution") %>%
     select(game_id, team_id, sequence_number, text,
            player_in = participants_0_athlete_id,
            player_out = participants_1_athlete_id) %>%
+    group_by(game_id) %>%
     mutate(event_number = row_number()) %>%
+    ungroup() %>%
     group_by(game_id, team_id) %>%
     transmute(sequence_number, text, player_in,
               player_out, event_number,
               sub_event = row_number(),
-              lineup = '')
+              lineup = "") %>%
+    mutate(across(player_in:player_out, as.character))
   
-  for (i in 1:max(lineupdf$event_number)) {
-    if ((lineupdf[[i, 'sub_event']] == 1)) {
-      lineupdf[[i, 'lineup']] = lineupdf %>%
-        filter(event_number == i) %>%
-        left_join(gamestarters, by=c("game_id", "team_id")) %>%
-        mutate(newlineup = str_replace(lineup.y, player_out, player_in)) %>%
-        pull(newlineup) %>%
-        SortLineup(.)
-    } else {
-      lineupdf[[i, 'lineup']] = lineupdf %>%
-        filter(event_number == i |
-                 sub_event == (lineupdf %>% filter(event_number == i) %>% pull(sub_event)) - 1,
-               team_id == (lineupdf %>% filter(event_number == i) %>% pull(team_id))) %>%
-        mutate(newlineup = str_replace(lag(lineup), player_out, player_in)) %>%
-        filter(event_number == i) %>%
-        pull(newlineup) %>%
-        SortLineup(.)
-    }
+  lineupdf = lineupdf %>%
+    left_join(starterdf %>% mutate(across(team_id, as.integer)), by=c("game_id", "team_id"), suffix=c("", "_old")) %>%
+    mutate(across(sub_event, as.integer)) %>%
+    arrange(game_id, team_id, sub_event) %>%
+    rowwise() %>%
+    mutate(lineup_old = ifelse(sub_event == 1, lineup_old, lag(lineup)),
+           lineup = str_replace(lineup_old, player_out, player_in)) %>%
+    ungroup()
+  
+  for (i in 2:max(lineupdf$sub_event)) {
+    lineupdf[lineupdf[,"sub_event"] == i, 'lineup'] = lineupdf %>%
+      filter(sub_event %in% c(i-1, i)) %>%
+      mutate(lineup_old = lag(lineup),
+             lineup = str_replace(lineup_old, player_out, player_in)) %>%
+      ungroup() %>%
+      filter(sub_event == i) %>% pull(lineup)
   }
   
-  return(game %>% 
-           select(game_id, team_id, sequence_number, away_team_id, home_team_id, type_text) %>%
-           mutate(home_lineup = ifelse(row_number() == 1, (gamestarters %>% filter(team_id == (game %>% filter(row_number() == 1) %>% pull(home_team_id))) %>% pull(lineup)), NA),
-                  away_lineup = ifelse(row_number() == 1, (gamestarters %>% filter(team_id == (game %>% filter(row_number() == 1) %>% pull(away_team_id))) %>% pull(lineup)), NA)) %>%
-           left_join(lineupdf, by=c("game_id", "team_id", "sequence_number")) %>%
-           select(-c(player_in:event_number, text)) %>%
-           mutate(home_lineup = ifelse(team_id == home_team_id & !is.na(lineup), lineup, home_lineup),
-                  away_lineup = ifelse(team_id == away_team_id & !is.na(lineup), lineup, away_lineup),
+  switches = lineupdf %>%
+    rowwise() %>%
+    mutate(lineup = paste0(sort(sapply(strsplit(lineup, ', '), as.integer)), collapse=', ')) %>%
+    ungroup() %>%
+    select(game_id, team_id, sequence_number, lineup) %>%
+    mutate(across(team_id, as.character))
+  
+  return(pbp %>%
+           select(game_id, team_id, sequence_number,
+                  team_id_away = away_team_id,
+                  team_id_home = home_team_id,
+                  type_text) %>%
+           mutate(across(team_id_away, as.character),
+                  across(team_id_home, as.character),
                   across(sequence_number, as.integer)) %>%
-           fill(home_lineup, away_lineup) %>%
-           select(game_id, sequence_number, home_lineup, away_lineup))
+           left_join(switches, by=c("game_id", "sequence_number", "team_id_away" = "team_id")) %>%
+           left_join(switches, by=c("game_id", "sequence_number", "team_id_home" = "team_id"), suffix=c("", "_home")) %>%
+           rename(lineup_away = lineup) %>%
+           left_join(starterdf, by=c("game_id", "team_id_away" = "team_id")) %>%
+           left_join(starterdf, by=c("game_id", "team_id_home" = "team_id"), suffix=c("", "_home_start")) %>%
+           rename(lineup_away_start = lineup) %>%
+           group_by(game_id) %>%
+           mutate(lineup_away = ifelse(row_number() == 1, lineup_away_start, lineup_away),
+                  lineup_home = ifelse(row_number() == 1, lineup_home_start, lineup_home)) %>%
+           fill(lineup_away, lineup_home) %>%
+           ungroup() %>%
+           select(game_id, sequence_number, lineup_away, lineup_home) %>%
+           mutate(across(sequence_number, as.character)))
 }
 
 PlayerIDToPlayerName = function(g_id, df, playerbox) {
@@ -283,4 +377,139 @@ PlayerIDToPlayerName = function(g_id, df, playerbox) {
                      .groups='keep') %>%
            ungroup() %>%
            spread(team, lineup))
+}
+
+GetOpponent = function(box) {
+  return(box %>%
+           select(game_id, team_id, opponent_id) %>%
+           mutate(across(opponent_id, as.character)))
+}
+
+OffensiveTeamByPossession = function(pbp) {
+  return(pbp %>%
+           FixShotLocations(.) %>%
+           GetPossessions(.) %>%
+           select(game_id, shooting_play, sequence_number, team_id, new_poss) %>%
+           group_by(game_id) %>%
+           mutate(aggposs = cumsum(new_poss)) %>%
+           ungroup() %>%
+           group_by(game_id, aggposs, team_id) %>%
+           summarize(nShots = sum(shooting_play), .groups='drop_last') %>%
+           top_n(1) %>%
+           ungroup() %>%
+           select(-nShots))
+}
+
+GetTeamPossessions = function(pbp) {
+  df = pbp %>% OffensiveTeamByPossession(.)
+  
+  switchTeam = df %>%
+    group_by(game_id, team_id) %>%
+    summarize(oPoss = n(),
+              .groups='keep') %>%
+    ungroup() %>%
+    left_join(df %>%
+                left_join((pbp %>%
+                             select(game_id, home=home_team_id, away=away_team_id) %>%
+                             distinct(game_id, home, away)),
+                          by="game_id") %>%
+                mutate(opp_id = ifelse(team_id == home, away, home)) %>%
+                select(-c("home", "away")), by=c("game_id", "team_id")) %>%
+    distinct(game_id, team_id, oPoss, opp_id) %>%
+    mutate(across(opp_id, as.character),
+           across(team_id, as.character))
+  
+  return(switchTeam %>%
+           left_join(switchTeam, by=c("game_id", "team_id" = "opp_id")) %>%
+           select(game_id, team_id, poss_o = oPoss.x, poss_d = oPoss.y) %>%
+           mutate(across(team_id, as.character)))
+}
+
+SetPBPAdvanced = function(pbp) {
+  return(pbp %>%
+           FixShotLocations(.) %>%
+           GetPossessions(.) %>%
+           select(shooting_play, game_id, sequence_number, text, type_text = type_text.x,
+                  team_id, event, shot_amount, new_poss, pitp, p1 = participants_0_athlete_id) %>%
+           group_by(game_id) %>%
+           mutate(aggposs = cumsum(new_poss)) %>%
+           ungroup() %>%
+           mutate(morey = ifelse((event == "Jump" & shot_amount == 3) |
+                                   event == "Free Throw" |
+                                   event == "Layup" |
+                                   event == "Dunk", 
+                                 1, 0),
+                  ft = ifelse(event == "Free Throw", 1, 0),
+                  turnover = ifelse(event == "Turnover", 1, 0),
+                  threePoint = ifelse(shot_amount == 3, 1, 0),
+                  shot = ifelse(shooting_play == TRUE & event != "Free Throw", 1, 0),
+                  oReb = ifelse(type_text == "Offensive Rebound" & !is.na(p1), 1, 0),
+                  dReb = ifelse(type_text == "Defensive Rebound" & !is.na(p1), 1, 0),
+                  assist = ifelse(str_detect(text, 'assist'), 1, 0),
+                  steal = ifelse(str_detect(text, 'steal'), 1, 0),
+                  block = ifelse(str_detect(text, 'block'), 1, 0)) %>%
+           group_by(game_id, aggposs, team_id) %>%
+           summarize(morey = ifelse(morey > 0, 1, 0),
+                     ft = sum(ft),
+                     turnover = sum(turnover),
+                     threePoint = sum(threePoint, na.rm=TRUE),
+                     shots = sum(shot, na.rm=TRUE),
+                     oReb = sum(oReb),
+                     dReb = sum(dReb),
+                     steals = sum(steal),
+                     assists = sum(assist),
+                     blocks = sum(block),
+                     paintShots = sum(pitp, na.rm=TRUE),
+                     .groups='keep') %>%
+           ungroup() %>%
+           mutate(across(team_id, as.character)))
+}
+
+AggregateAdvanced = function(pbp, box=load_nba_team_box()) {
+  leftdf = pbp %>%
+    SetPBPAdvanced(.) %>%
+    group_by(game_id, team_id) %>%
+    summarize(morey_o = sum(morey),
+              ft_o = sum(ft),
+              to_lost_o = sum(turnover),
+              threePoint_o = sum(threePoint),
+              totalShots_o = sum(shots),
+              oReb_o = sum(oReb),
+              dReb_o = sum(dReb),
+              steal_lost_o = sum(steals),
+              block_against_o = sum(blocks),
+              paintShots_o = sum(paintShots),
+              .groups='keep') %>%
+    ungroup() %>%
+    mutate(across(team_id, as.character)) %>%
+    left_join(GetOpponent(box), by=c("game_id", "team_id" = "opponent_id")) %>%
+    rename(., opponent_id = team_id.y)
+  
+  return(leftdf %>%         
+           left_join(leftdf %>% mutate(across(opponent_id, as.character)),
+                     by=c("game_id", "team_id"="opponent_id"),
+                     suffix = c("", ".y")) %>%
+           select(-team_id.y) %>%
+           mutate(across(team_id, as.character)) %>%
+           rename_with(~gsub("_o.y", "_d", .x)) %>%
+           rename_with(~gsub('_lost_d', '_d', .x)) %>%
+           rename_with(~gsub('_against_d', '_d', .x)) %>%
+           left_join(pbp %>% GetTeamPossessions(.), by=c("game_id", "team_id")) %>%
+           select(-opponent_id))
+}
+
+SeasonAdvancedStats = function(pbp, box) {
+  return(pbp %>%
+           AggregateAdvanced(., box) %>%
+           left_join(GetGameScores(pbp, box), by=c("game_id", "team_id")) %>%
+           group_by(team_id) %>%
+           summarize(across(morey_o:score_d, sum)) %>%
+           ungroup() %>%
+           mutate(across(contains("_o") & !contains("poss"), ~ .x/poss_o),
+                  across(contains("_d") & !contains("poss"), ~ .x/poss_d)) %>%
+           select(-contains("poss")) %>%
+           rename_with(~gsub("_o", "Rate_o", .x)) %>%
+           rename_with(~gsub("_d", "Rate_d", .x)) %>%
+           idToTeamName(.) %>%
+           arrange(team))
 }

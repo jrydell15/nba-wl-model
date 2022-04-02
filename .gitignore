@@ -6,3 +6,5 @@
 *.rdb
 *.rdx
 *__packages
+.Rproj*
+data/*
