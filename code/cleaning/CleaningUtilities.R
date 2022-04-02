@@ -1,5 +1,6 @@
 if(!require(hoopR)) {install.packages("hoopR"); require(hoopR)}
 if(!require(tidyverse)) {install.packages("tidyverse"); require(tidyverse)}
+require(here)
 
 FixShotLocations = function(df) {
   # input:   raw pbp dataframe
@@ -16,23 +17,27 @@ FixShotLocations = function(df) {
   
   df = df %>%
     mutate(coordinate_x = coordinate_x - 25,
-           dist_from_basket = sqrt(coordinate_x^2 + coordinate_y^2),
-           shot_amount = ifelse(shooting_play == TRUE, 0, NA))
+           raw_y = coordinate_y,
+           coordinate_y = coordinate_y + 5.25,
+           dist_from_basket = sqrt(coordinate_x^2 + raw_y^2),
+           shot_amount = ifelse(shooting_play == TRUE, 0, NA),
+           pitp = ifelse(shooting_play == TRUE, 0, NA))
   
   dfthrees = df %>%
-    filter(abs(coordinate_x) < 50, shooting_play == TRUE) %>%
-    filter(dist_from_basket >= 23.75 | (coordinate_y < 14 & abs(coordinate_x) >= 22)) %>%
+    filter(!str_detect(type_text, 'Free Throw'), shooting_play == TRUE) %>%
+    filter(dist_from_basket >= 23.75 | (raw_y < 14 & abs(coordinate_x) >= 22)) %>%
     mutate(shot_amount = 3)
   
   dffts = df %>%
-    filter(abs(coordinate_x) > 100, shooting_play == TRUE) %>%
+    filter(str_detect(type_text, 'Free Throw'), shooting_play == TRUE) %>%
     mutate(shot_amount = 1)
   
   dftwos = df %>%
-    filter(abs(coordinate_x) < 50, shooting_play == TRUE) %>%
-    filter((coordinate_y < 14 & abs(coordinate_x) < 22) | (dist_from_basket < 23.75 & coordinate_y >= 14),
+    filter(!str_detect(type_text, 'Free Throw'), shooting_play == TRUE) %>%
+    filter((raw_y < 14 & abs(coordinate_x) < 22) | (dist_from_basket < 23.75 & raw_y >= 14),
            !str_detect(text, "three point")) %>%
-    mutate(shot_amount = 2)
+    mutate(shot_amount = 2,
+           pitp = ifelse(coordinate_y <= 18.8 & abs(coordinate_x) <= 8, 1, pitp))
   
   df = df %>%
     filter(shooting_play == FALSE) %>%
@@ -57,7 +62,7 @@ GetPossessions = function(df, agg=FALSE) {
   # while not perfect, offers a pretty good estimation of
   # the number of possessions in a game
   
-  simpleplaytypes = read.csv('./code/cleaning/shottypessimple.csv')
+  simpleplaytypes = read.csv(here('code/cleaning/shottypessimple.csv'))
   
   df = df %>%
     mutate(across(type_id, as.integer),
@@ -423,8 +428,8 @@ SetPBPAdvanced = function(pbp) {
   return(pbp %>%
            FixShotLocations(.) %>%
            GetPossessions(.) %>%
-           select(shooting_play, game_id, sequence_number, type_text = type_text.x,
-                  team_id, event, shot_amount, new_poss, p1 = participants_0_athlete_id) %>%
+           select(shooting_play, game_id, sequence_number, text, type_text = type_text.x,
+                  team_id, event, shot_amount, new_poss, pitp, p1 = participants_0_athlete_id) %>%
            group_by(game_id) %>%
            mutate(aggposs = cumsum(new_poss)) %>%
            ungroup() %>%
@@ -438,15 +443,22 @@ SetPBPAdvanced = function(pbp) {
                   threePoint = ifelse(shot_amount == 3, 1, 0),
                   shot = ifelse(shooting_play == TRUE & event != "Free Throw", 1, 0),
                   oReb = ifelse(type_text == "Offensive Rebound" & !is.na(p1), 1, 0),
-                  dReb = ifelse(type_text == "Defensive Rebound" & !is.na(p1), 1, 0)) %>%
+                  dReb = ifelse(type_text == "Defensive Rebound" & !is.na(p1), 1, 0),
+                  assist = ifelse(str_detect(text, 'assist'), 1, 0),
+                  steal = ifelse(str_detect(text, 'steal'), 1, 0),
+                  block = ifelse(str_detect(text, 'block'), 1, 0)) %>%
            group_by(game_id, aggposs, team_id) %>%
-           summarize(morey = sum(morey),
+           summarize(morey = ifelse(morey > 0, 1, 0),
                      ft = sum(ft),
                      turnover = sum(turnover),
                      threePoint = sum(threePoint, na.rm=TRUE),
                      shots = sum(shot, na.rm=TRUE),
                      oReb = sum(oReb),
                      dReb = sum(dReb),
+                     steals = sum(steal),
+                     assists = sum(assist),
+                     blocks = sum(block),
+                     paintShots = sum(pitp, na.rm=TRUE),
                      .groups='keep') %>%
            ungroup() %>%
            mutate(across(team_id, as.character)))
@@ -458,11 +470,14 @@ AggregateAdvanced = function(pbp, box=load_nba_team_box()) {
     group_by(game_id, team_id) %>%
     summarize(morey_o = sum(morey),
               ft_o = sum(ft),
-              to_o = sum(turnover),
-              theePoint_o = sum(threePoint),
+              to_lost_o = sum(turnover),
+              threePoint_o = sum(threePoint),
               totalShots_o = sum(shots),
               oReb_o = sum(oReb),
               dReb_o = sum(dReb),
+              steal_lost_o = sum(steals),
+              block_against_o = sum(blocks),
+              paintShots_o = sum(paintShots),
               .groups='keep') %>%
     ungroup() %>%
     mutate(across(team_id, as.character)) %>%
@@ -476,6 +491,8 @@ AggregateAdvanced = function(pbp, box=load_nba_team_box()) {
            select(-team_id.y) %>%
            mutate(across(team_id, as.character)) %>%
            rename_with(~gsub("_o.y", "_d", .x)) %>%
+           rename_with(~gsub('_lost_d', '_d', .x)) %>%
+           rename_with(~gsub('_against_d', '_d', .x)) %>%
            left_join(pbp %>% GetTeamPossessions(.), by=c("game_id", "team_id")) %>%
            select(-opponent_id))
 }
