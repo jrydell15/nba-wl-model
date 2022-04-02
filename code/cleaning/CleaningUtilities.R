@@ -449,7 +449,7 @@ SetPBPAdvanced = function(pbp) {
                   steal = ifelse(str_detect(text, 'steal'), 1, 0),
                   block = ifelse(str_detect(text, 'block'), 1, 0)) %>%
            group_by(game_id, aggposs, team_id) %>%
-           summarize(morey = ifelse(morey > 0, 1, 0),
+           summarize(morey = sum(morey),
                      ft = sum(ft),
                      turnover = sum(turnover),
                      threePoint = sum(threePoint, na.rm=TRUE),
@@ -462,7 +462,8 @@ SetPBPAdvanced = function(pbp) {
                      paintShots = sum(pitp, na.rm=TRUE),
                      .groups='keep') %>%
            ungroup() %>%
-           mutate(across(team_id, as.character)))
+           mutate(across(team_id, as.character),
+                  morey = ifelse(morey > 0, 1, morey)))
 }
 
 AggregateAdvanced = function(pbp, box=load_nba_team_box()) {
