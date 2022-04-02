@@ -63,6 +63,7 @@ GetPossessions = function(df, agg=FALSE) {
   # the number of possessions in a game
   
   simpleplaytypes = read.csv(here('code/cleaning/shottypessimple.csv'))
+
   
   df = df %>%
     mutate(across(type_id, as.integer),
