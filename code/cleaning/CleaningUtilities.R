@@ -430,7 +430,8 @@ SetPBPAdvanced = function(pbp) {
            FixShotLocations(.) %>%
            GetPossessions(.) %>%
            select(shooting_play, game_id, sequence_number, text, type_text = type_text.x,
-                  team_id, event, shot_amount, new_poss, pitp, p1 = participants_0_athlete_id) %>%
+                  team_id, event, shot_amount, new_poss, pitp, p1 = participants_0_athlete_id,
+                  home_score, away_score, home_team_id, away_team_id) %>%
            group_by(game_id) %>%
            mutate(aggposs = cumsum(new_poss)) %>%
            ungroup() %>%
@@ -447,7 +448,9 @@ SetPBPAdvanced = function(pbp) {
                   dReb = ifelse(type_text == "Defensive Rebound" & !is.na(p1), 1, 0),
                   assist = ifelse(str_detect(text, 'assist'), 1, 0),
                   steal = ifelse(str_detect(text, 'steal'), 1, 0),
-                  block = ifelse(str_detect(text, 'block'), 1, 0)) %>%
+                  block = ifelse(str_detect(text, 'block'), 1, 0),
+                  teamScore = ifelse(team_id == home_team_id, home_score, away_score),
+                  oppScore = ifelse(team_id == home_team_id, away_score, home_score)) %>%
            group_by(game_id, aggposs, team_id) %>%
            summarize(morey = sum(morey),
                      ft = sum(ft),
@@ -460,6 +463,8 @@ SetPBPAdvanced = function(pbp) {
                      assists = sum(assist),
                      blocks = sum(block),
                      paintShots = sum(pitp, na.rm=TRUE),
+                     oPts = max(teamScore),
+                     dPts = max(oppScore),
                      .groups='keep') %>%
            ungroup() %>%
            mutate(across(team_id, as.character),
@@ -470,16 +475,18 @@ AggregateAdvanced = function(pbp, box=load_nba_team_box()) {
   leftdf = pbp %>%
     SetPBPAdvanced(.) %>%
     group_by(game_id, team_id) %>%
-    summarize(morey_o = sum(morey),
-              ft_o = sum(ft),
-              to_lost_o = sum(turnover),
-              threePoint_o = sum(threePoint),
-              totalShots_o = sum(shots),
-              oReb_o = sum(oReb),
-              dReb_o = sum(dReb),
-              steal_lost_o = sum(steals),
-              block_against_o = sum(blocks),
-              paintShots_o = sum(paintShots),
+    summarize(morey_team = sum(morey),
+              ft_team = sum(ft),
+              to_lost_team = sum(turnover),
+              threePoint_team = sum(threePoint),
+              totalShots_team = sum(shots),
+              oReb_team = sum(oReb),
+              dReb_team = sum(dReb),
+              steal_lost_team = sum(steals),
+              block_against_team = sum(blocks),
+              paintShots_team = sum(paintShots),
+              oPts_team = max(oPts),
+              dPts_team = max(dPts),
               .groups='keep') %>%
     ungroup() %>%
     mutate(across(team_id, as.character)) %>%
@@ -492,9 +499,9 @@ AggregateAdvanced = function(pbp, box=load_nba_team_box()) {
                      suffix = c("", ".y")) %>%
            select(-team_id.y) %>%
            mutate(across(team_id, as.character)) %>%
-           rename_with(~gsub("_o.y", "_d", .x)) %>%
-           rename_with(~gsub('_lost_d', '_d', .x)) %>%
-           rename_with(~gsub('_against_d', '_d', .x)) %>%
+           rename_with(~gsub("_team.y", "_opp", .x)) %>%
+           rename_with(~gsub('_lost_opp', '_opp', .x)) %>%
+           rename_with(~gsub('_against_opp', '_opp', .x)) %>%
            left_join(pbp %>% GetTeamPossessions(.), by=c("game_id", "team_id")) %>%
            select(-opponent_id))
 }
@@ -506,11 +513,11 @@ SeasonAdvancedStats = function(pbp, box) {
            group_by(team_id) %>%
            summarize(across(morey_o:score_d, sum)) %>%
            ungroup() %>%
-           mutate(across(contains("_o") & !contains("poss"), ~ .x/poss_o),
-                  across(contains("_d") & !contains("poss"), ~ .x/poss_d)) %>%
+           mutate(across(contains("_team") & !contains("poss"), ~ .x/poss_team),
+                  across(contains("_opp") & !contains("poss"), ~ .x/poss_opp)) %>%
            select(-contains("poss")) %>%
-           rename_with(~gsub("_o", "Rate_o", .x)) %>%
-           rename_with(~gsub("_d", "Rate_d", .x)) %>%
+           rename_with(~gsub("_team", "Rate_team", .x)) %>%
+           rename_with(~gsub("_opp", "Rate_opp", .x)) %>%
            idToTeamName(.) %>%
            arrange(team))
 }
