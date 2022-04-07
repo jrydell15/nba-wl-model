@@ -20,7 +20,7 @@ GetCummulativeDF = function(year=hoopR::most_recent_nba_season()) {
     group_by(team_id) %>%
     # o is "team 1", d is "team 2"
     mutate(cum_morey_team = cumsum(morey_team),
-           cum_poss_team = cumsum(poss_o),
+           cum_poss_team = cumsum(poss_team),
            cum_moreyRate_team = cum_morey_team / cum_poss_team,           #moreyRate: the prop of possessions which produced a FT, 3PT, or layup/dunk
            cum_steal_team = cumsum(steal_lost_team),
            cum_stealRate_team = cum_steal_team / cum_poss_team,           #stealRate_team: prop of possessions which ended by turning over the ball due to it being stolen (high is bad)
@@ -38,7 +38,7 @@ GetCummulativeDF = function(year=hoopR::most_recent_nba_season()) {
            cum_block_against_team = cumsum(block_against_team),
            cum_blockRate_opp = cum_block_against_team / cum_totalShots_team,   #blockRate_opp: prop of total shots were blocked by the defense (high is good)
            cum_morey_opp = cumsum(morey_opp),
-           cum_poss_opp = cumsum(poss_d),
+           cum_poss_opp = cumsum(poss_opp),
            cum_moreyRate_opp = cum_morey_opp / cum_poss_opp,
            cum_steal_opp = cumsum(steal_opp),
            cum_stealRate_opp = cum_steal_opp / cum_poss_opp,
@@ -57,6 +57,10 @@ GetCummulativeDF = function(year=hoopR::most_recent_nba_season()) {
            cum_blockRate_team = cum_block_opp / cum_totalShots_opp,
            cum_paintRate_team = cumsum(paintShots_team) / cum_totalShots_team,
            cum_paintRate_opp = cumsum(paintShots_opp) / cum_totalShots_opp,
+           cum_oPoints_team = cumsum(oPts_team),
+           cum_oRating_team = cum_oPoints_team / cum_poss_team,
+           cum_dPoints_team = cumsum(dPts_team),
+           cum_dRating_team = cum_dPoints_team / cum_poss_opp,
            gameNum = row_number()) %>%
     ungroup()
   
