@@ -29,13 +29,15 @@ for (year in startYear:endYear) {
     pivot_longer(cols=c('home.id', 'away.id'), values_to='teamID', names_to='loc') %>% 
     mutate(loc = as.factor(ifelse(str_detect(loc, 'home'), 'H', 'A'))) %>%
     left_join(winnerDF, by='game_id') %>%
+    mutate(win = as.factor(ifelse(loc == 'H', home_win, ifelse(home_win == 1, 0, 1)))) %>%
     group_by(teamID) %>%
     mutate(teamGameNum = row_number(),
            lastVenue = lag(venue.id),
-           lastGameDate = lag(date)) %>%
+           lastGameDate = lag(date),
+           teamWins = cumsum(as.integer(win) - 1),
+           cum_winPct = teamWins / teamGameNum) %>%
     ungroup() %>%
-    mutate(restDays = as.integer(date - lastGameDate),
-           win = as.factor(ifelse(loc == 'H', home_win, ifelse(home_win == 1, 0, 1)))) %>%
+    mutate(restDays = as.integer(date - lastGameDate)) %>%
     left_join(venueDists,
               by = c('venue.id' = 'toVenueID', 'lastVenue' = 'fromVenueID')) %>%
     mutate(dist_miles = replace_na(dist_miles, 0),
@@ -45,7 +47,7 @@ for (year in startYear:endYear) {
            logTravelDist = log(dist_miles + 1),
            restDays = ifelse(restDays == 0, restDays, restDays - 1),
            restDays = replace_na(restDays, -99)) %>% 
-    select(game_id, date, teamID, teamGameNum, loc, btb, logTravelDist, restDays, win) %>% 
+    select(game_id, date, teamID, cum_winPct, teamGameNum, loc, btb, logTravelDist, restDays, win) %>% 
     left_join(aggDF %>%
                 select(game_id, team_id, contains("Rat")),
               by=c('game_id', 'teamID' = 'team_id')) %>%
