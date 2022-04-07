@@ -394,7 +394,7 @@ OffensiveTeamByPossession = function(pbp) {
            mutate(aggposs = cumsum(new_poss)) %>%
            ungroup() %>%
            group_by(game_id, aggposs, team_id) %>%
-           summarize(nShots = sum(shooting_play), .groups='drop_last') %>%
+           summarize(nShots = sum(shooting_play), .groups='keep') %>%
            top_n(1) %>%
            ungroup() %>%
            select(-nShots))
@@ -421,7 +421,7 @@ GetTeamPossessions = function(pbp) {
   
   return(switchTeam %>%
            left_join(switchTeam, by=c("game_id", "team_id" = "opp_id")) %>%
-           select(game_id, team_id, poss_o = oPoss.x, poss_d = oPoss.y) %>%
+           select(game_id, team_id, poss_team = oPoss.x, poss_opp = oPoss.y) %>%
            mutate(across(team_id, as.character)))
 }
 
