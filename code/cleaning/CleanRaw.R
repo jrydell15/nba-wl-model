@@ -1,5 +1,6 @@
 require(tidyverse)
 require(here)
+require(lubridate)
 
 source(here('code/cleaning/CleaningUtilities.R'))
 
@@ -7,8 +8,11 @@ GetCummulativeDF = function(year=hoopR::most_recent_nba_season()) {
   pbp = read_csv(here(paste0('data/raw/PBP/PBP_', year, '.csv')))
   box = read_csv(here(paste0('data/raw/teamBox/teamBox_', year, '.csv')))
   playerBox = read_csv(here(paste0('data/raw/playerBox/playerBox_', year, '.csv')))
+  schedule = read_csv(here(paste0('data/raw/schedule/schedule', year, '.csv')))
   pbp_noGarbageTime = FilterGarbageTime(pbp, playerBox)
   adv = AggregateAdvanced(pbp_noGarbageTime, box)
+  adv = adv %>%
+         left_join(schedule %>% select(game_id, date), by='game_id')
   
   rm(list=c("pbp", "box", "pbp_noGarbageTime", "playerBox"))
   
@@ -16,6 +20,7 @@ GetCummulativeDF = function(year=hoopR::most_recent_nba_season()) {
   team = teams %>% mutate(across(team_id, as.numeric)) %>% filter(team_id <= 30)
   
   cumadv = adv %>% 
+    arrange(date) %>%
     filter(as.numeric(team_id) %in% team$team_id) %>%
     group_by(team_id) %>%
     # o is "team 1", d is "team 2"
