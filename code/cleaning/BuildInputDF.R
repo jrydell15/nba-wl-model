@@ -38,6 +38,7 @@ for (year in startYear:endYear) {
            cum_winPct = teamWins / teamGameNum) %>%
     ungroup() %>%
     mutate(restDays = as.integer(date - lastGameDate)) %>%
+
     left_join(venueDists,
               by = c('venue.id' = 'toVenueID', 'lastVenue' = 'fromVenueID')) %>%
     mutate(dist_miles = replace_na(dist_miles, 0),
@@ -48,6 +49,7 @@ for (year in startYear:endYear) {
            restDays = ifelse(restDays == 0, restDays, restDays - 1),
            restDays = replace_na(restDays, -99)) %>% 
     select(game_id, date, teamID, cum_winPct, teamGameNum, loc, btb, logTravelDist, restDays, win) %>% 
+
     left_join(aggDF %>%
                 select(game_id, team_id, contains("Rat")),
               by=c('game_id', 'teamID' = 'team_id')) %>%
