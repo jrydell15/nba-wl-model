@@ -447,8 +447,8 @@ SetPBPAdvanced = function(pbp) {
                   oReb = ifelse(type_text == "Offensive Rebound" & !is.na(p1), 1, 0),
                   dReb = ifelse(type_text == "Defensive Rebound" & !is.na(p1), 1, 0),
                   assist = ifelse(str_detect(text, 'assist'), 1, 0),
-                  steal = ifelse(str_detect(text, 'steal'), 1, 0),
-                  block = ifelse(str_detect(text, 'block'), 1, 0),
+                  steal = ifelse(str_detect(text, 'steal') | str_detect(text, 'Stolen'), 1, 0),
+                  block = ifelse(str_detect(tolower(text), 'block'), 1, 0),
                   teamScore = ifelse(team_id == home_team_id, home_score, away_score),
                   oppScore = ifelse(team_id == home_team_id, away_score, home_score)) %>%
            group_by(game_id, aggposs, team_id) %>%
@@ -459,9 +459,9 @@ SetPBPAdvanced = function(pbp) {
                      shots = sum(shot, na.rm=TRUE),
                      oReb = sum(oReb),
                      dReb = sum(dReb),
-                     steals = sum(steal),
-                     assists = sum(assist),
-                     blocks = sum(block),
+                     steals = sum(steal, na.rm=TRUE),
+                     assists = sum(assist, na.rm=TRUE),
+                     blocks = sum(block, na.rm=TRUE),
                      paintShots = sum(pitp, na.rm=TRUE),
                      oPts = max(teamScore),
                      dPts = max(oppScore),
