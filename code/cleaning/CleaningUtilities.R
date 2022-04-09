@@ -195,7 +195,7 @@ GetGameWinners = function(df) {
            mutate(score = FTM + 2*(FGM - FG3M) + 3*FG3M) %>%
            select(game_id, home_away, score) %>%
            spread(home_away, score) %>%
-           mutate(home_win = ifelse(AWAY > HOME, 0, 1)) %>%
+           mutate(home_win = ifelse(AWAY > HOME, 1, 0)) %>%
            select(game_id, home_win))
 }
 
