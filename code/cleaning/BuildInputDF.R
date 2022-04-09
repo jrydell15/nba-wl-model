@@ -55,11 +55,13 @@ BuildInputDFs = function(years) {
       select(game_id, date, teamID, cum_winPct, teamGameNum, loc, btb, logTravelDist, restDays, win)
   
       inputCenteredScaled = leftdf %>%
+        mutate(date = date(date)) %>%
         left_join(centeredScaledDF,
                   by=c('date', 'teamID' = 'team_id')) %>% 
         na.omit()
 
       inputLagged = leftdf %>%
+        mutate(date = date(date)) %>%
         left_join(rawLaggedDF,
                   by=c('date', 'game_id', 'teamID'='team_id')) %>%
         na.omit()
