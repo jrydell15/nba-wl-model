@@ -12,7 +12,8 @@ GetCummulativeDF = function(year=hoopR::most_recent_nba_season()) {
   pbp_noGarbageTime = FilterGarbageTime(pbp, playerBox)
   adv = AggregateAdvanced(pbp_noGarbageTime, box)
   adv = adv %>%
-         left_join(schedule %>% select(game_id, date), by='game_id')
+         left_join(schedule %>% select(game_id, date), by='game_id') %>%
+         na.omit()
   
   rm(list=c("pbp", "box", "pbp_noGarbageTime", "playerBox"))
   

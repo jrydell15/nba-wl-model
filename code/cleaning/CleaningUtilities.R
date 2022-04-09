@@ -452,19 +452,19 @@ SetPBPAdvanced = function(pbp) {
                   teamScore = ifelse(team_id == home_team_id, home_score, away_score),
                   oppScore = ifelse(team_id == home_team_id, away_score, home_score)) %>%
            group_by(game_id, aggposs, team_id) %>%
-           summarize(morey = sum(morey),
-                     ft = sum(ft),
-                     turnover = sum(turnover),
+           summarize(morey = sum(morey, na.rm=TRUE),
+                     ft = sum(ft, na.rm=TRUE),
+                     turnover = sum(turnover, na.rm=TRUE),
                      threePoint = sum(threePoint, na.rm=TRUE),
                      shots = sum(shot, na.rm=TRUE),
-                     oReb = sum(oReb),
-                     dReb = sum(dReb),
+                     oReb = sum(oReb, na.rm=TRUE),
+                     dReb = sum(dReb, na.rm=TRUE),
                      steals = sum(steal, na.rm=TRUE),
                      assists = sum(assist, na.rm=TRUE),
                      blocks = sum(block, na.rm=TRUE),
                      paintShots = sum(pitp, na.rm=TRUE),
-                     oPts = max(teamScore),
-                     dPts = max(oppScore),
+                     oPts = max(teamScore, na.rm=TRUE),
+                     dPts = max(oppScore, na.rm=TRUE),
                      .groups='keep') %>%
            ungroup() %>%
            mutate(across(team_id, as.character),
