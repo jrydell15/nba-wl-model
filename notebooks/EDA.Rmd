@@ -1,0 +1,251 @@
+---
+title: "EDA"
+output: html_document
+---
+
+```{r setup}
+require(here)
+require(tidyverse)
+require(hoopR)
+require(ggplot2)
+require(RColorBrewer)
+require(glue)
+
+ggplot2::theme_set(theme_minimal() + theme(legend.position='none'))
+
+teamsdf = espn_nba_teams()
+
+teamColors = teamsdf %>% select(team_id, color) %>%
+                  mutate(across(team_id, as.integer),
+                         color = paste0("#", color)) %>%
+                  arrange(team_id) %>%
+                  pull(color)
+```
+
+```{r, warning=FALSE}
+year = 2018
+
+cumdf = read_csv(here(glue('data/input/lagged/input_lag_{year}.csv')))
+
+aggdf = read_csv(here(glue('data/aggregated/agg_{year}.csv'))) %>%
+          select(game_id:date, gameNum)
+
+combodf = cumdf %>%
+            left_join(aggdf %>%
+                        select(-gameNum),
+                      by=c('game_id', 'teamID' = 'team_id')) %>%
+            mutate(across(win, as.factor))
+```
+
+```{r}
+stabilityPlot = function(df, statname, espn_teams = hoopR::espn_nba_teams()) {
+  df %>%
+    left_join(espn_teams %>% select(team_id, mascot) %>% mutate(across(team_id, as.integer)), by=c('teamID' = 'team_id')) %>%
+    mutate(across(mascot, as.factor)) %>%
+    ggplot(aes_string(x="teamGameNum", y=statname, color="mascot")) +
+    geom_line() +
+    facet_wrap(~mascot) +
+    theme(legend.position = 'none')
+}
+
+#checking stability
+combodf %>% stabilityPlot(., "cum_moreyRate_team")
+
+combodf %>%
+  select(teamID, teamGameNum, contains("Rat")) %>%
+  left_join(hoopR::espn_nba_teams() %>% select(team_id, mascot) %>% mutate(across(team_id, as.integer)), by=c('teamID' = 'team_id')) %>%
+  select(mascot, everything(), -teamID) %>%
+  pivot_longer(cols=contains("Rate_team")) %>%
+  filter(teamGameNum < 25) %>%
+  ggplot(aes(x=teamGameNum, y=value, color=mascot)) +
+  geom_line(alpha=0.5) +
+  facet_grid(rows = vars(name), scales='free') + 
+  theme(legend.position='none')
+```
+
+All stats seem to stabilize after about 15 games, even without accounting for injury or traded players.
+
+Now let's make sure the cumulative rates are even correlated in the correct direction with the stat it is trying to describe:
+
+1. Morey Rate
+
+```{r}
+require(corrplot)
+
+dfcorr = cor(combodf %>% select(contains("moreyRate"), morey_team, morey_opp))
+
+corrplot(dfcorr, order='hclust')
+```
+
+The cumulative Rates for both offense and defense are positively correlated.
+
+2. FT Rate
+
+```{r}
+dfcorr = cor(combodf %>% select(contains("ftRate"), ft_team, ft_opp))
+
+corrplot(dfcorr, order='hclust')
+```
+
+The cumulative rates seem to be slightly correlated with what they are trying to measure. Interestingly, the ft_team and ft_opp values are slightly positively correlated, maybe because the officials feel like they need to "even out" the foul difference?
+
+3. Steals
+
+```{r}
+dfcorr = cor(combodf %>% select(contains('stealRate'), steal_lost_team, steal_opp))
+
+corrplot(dfcorr, order='hclust')
+```
+
+4. Rebounding Rates
+```{r}
+dfcorr = cor(combodf %>% select(contains("RebRate"), oReb_team, dReb_team, oReb_opp, dReb_opp))
+
+corrplot(dfcorr, order='hclust')
+```
+
+The cumulative Rebounding Rates for _team and _opp are reciprocals of each other by definition, which is the reason for the -1 correlation. Interesting from this plot is that when a team has an advantage on the boards, they take the advantage on both ends, since the oReb and dReb raw values are positively correlated. The cumulative rebounding rates are not strongly correlated with the raw values, I would expect because rebounding strongly depends on the competition. The plot below confirms this, showing that when taking into account the relative strengths of each team, the rebounding rate is random noise.
+
+```{r}
+combodf2 = combodf %>% select(game_id, teamID, teamID_opp) %>%
+           group_by(game_id) %>%
+           pivot_longer(cols=teamID:teamID_opp) %>%
+           mutate(colName = paste0("team", row_number())) %>%
+           ungroup() %>%
+           select(-name) %>%
+           pivot_wider(names_from=colName, values_from=value)
+combodf2 = rbind(combodf2, combodf2 %>% select(game_id, team1 = team2, team2 = team1)) %>%
+  arrange(game_id) %>%
+  mutate(across(team1:team2, as.integer))
+
+combodf2 = combodf2 %>%
+           left_join(combodf %>%
+                        select(game_id, teamID, oReb_team, dReb_opp,
+                               cum_oRebRate_team, cum_oRebRate_team),
+                      by=c('game_id', 'team1' = 'teamID')) %>%
+           left_join(combodf %>%
+                        select(game_id, teamID_opp, oReb_team, dReb_opp,
+                               cum_oRebRate_team, cum_oRebRate_opp),
+                      by=c('game_id', 'team2' = 'teamID_opp'),
+                      suffix=c('_team1', '_team2')) %>%
+          na.omit() %>%
+          rename(cum_oRebRate_opp_team2 = cum_oRebRate_opp)
+
+combodf_small = combodf2 %>% group_by(game_id) %>% sample_n(1) %>% ungroup()
+plotdf = combodf2 %>% mutate(reboundDiff = cum_oRebRate_opp_team2 - cum_oRebRate_team_team1,
+                            resid = oReb_team_team1 - (cum_oRebRate_team_team1 - reboundDiff/2)*(oReb_team_team1 + dReb_opp_team1),
+                            actualORebRate = oReb_team_team1 / (oReb_team_team1 + dReb_opp_team1))
+
+
+ggplot(plotdf, aes(x=reboundDiff, y=actualORebRate)) +
+  geom_point()
+```
+
+Checking to see if block rate affects the opponent's observed paint rate:
+
+```{r}
+combodf %>%
+  ggplot(aes(x=cum_blockRate_team, y=paintShots_opp)) +
+  geom_point()
+```
+
+The raw numbers don't show that other teams are scared of a good block rate.
+
+```{r}
+combodf %>%
+  ggplot(aes(x=cum_paintRate_team, y=paintShots_team)) +
+  geom_point()
+```
+
+```{r}
+m = mean(combodf$cum_dRating_team_opp)
+h = mean(combodf$cum_oRating_team)
+
+combodf %>%
+  ggplot(aes(x=cum_oRating_team, y=cum_dRating_team_opp, color=win)) +
+  geom_point(alpha=0.5) +
+  theme(legend.position='right') +
+  labs(color='win') +
+  geom_hline(yintercept = m) +
+  geom_vline(xintercept = h) +
+  scale_y_reverse()
+```
+
+Good opponent defenses are to the top. Good team offenses are to the right. Good offenses winning against bad defenses passes the logic test.
+
+```{r}
+netRating = combodf %>%
+  mutate(cum_netRating_team = cum_oRating_team - cum_dRating_team,
+         cum_netRating_opp = cum_oRating_team_opp - cum_dRating_team_opp)
+
+v = mean(netRating$cum_netRating_team)
+h = mean(netRating$cum_netRating_opp)
+
+netRating %>%
+  ggplot(aes(x=cum_netRating_team, y=cum_netRating_opp, color=win)) +
+  geom_point(alpha=0.4) +
+  geom_hline(yintercept = h) +
+  geom_vline(xintercept = v) +
+  theme(legend.position='top')
+```
+
+Good opponents are to the top, good teams are to the right. From this, a good team against a bad opponent wins more often, which is good.
+
+
+```{r}
+combodf %>%
+  ggplot(aes(x=cum_moreyRate_team, y=cum_oRating_team, color=as.factor(teamID))) +
+  geom_point(alpha=0.4) +
+  scale_color_manual(values = teamColors)
+```
+
+Some teams have a good shot profile but horrible oRating. This will likely boil down to poor team shooting.
+
+```{r}
+combodf %>%
+  ggplot(aes(x=cum_moreyRate_opp, y=cum_dRating_team,
+             color=as.factor(teamID))) +
+  geom_point(alpha=0.4) +
+  scale_y_reverse() +
+  scale_color_manual(values = teamColors)
+  
+  
+```
+
+On the flip side, allowing a good shot profile is really bad for your defense. This is likely because the percentage of shots a defense allows is random, unlike the percentage of shots you make as an offense.
+
+```{r}
+combodf %>%
+  ggplot(aes(x=poss_team, y=cum_oRating_team)) +
+  geom_point()
+```
+
+More possessions doesn't necessarily mean that you get better looks.
+
+```{r}
+defensivePCAdf = combodf %>%
+           filter(cum_dRating_team <= 1.1 & cum_dRating_team >= 0.8) %>%
+           select(cum_stealRate_team, cum_moreyRate_opp,
+                  cum_blockRate_team, cum_dRebRate_team)
+defensivePCA = princomp(defensivePCAdf)
+
+PCA_x = defensivePCA$scores[,1]
+PCA_y = defensivePCA$scores[,2]
+dRats = combodf %>% 
+        filter(cum_dRating_team <= 1.1 & cum_dRating_team >= 0.8) %>%
+        select(cum_dRating_team) %>% pull
+
+mid = mean(dRats)
+
+plotdf = tibble('PC1' = PCA_x, 'PC2' = PCA_y, 'color' = dRats)
+
+plotdf %>%
+  ggplot(aes(x=PC1, y=PC2, color=color)) +
+  geom_point() +
+  theme(legend.position = 'right') +
+  scale_color_distiller(palette = 'RdYlBu')
+
+defensivePCA$loadings
+```
+
+Good defenses tend to be lower on the first principal component, which here means that the defense has a high defensive rebounding rate and a low defensive Morey Rate. This makes sense because a higher defensive rebounding rate means less second chance points and a lower defensive Morey Rate means that the defense isn't allowing the offense to get highly efficient shots. 
