@@ -1,0 +1,522 @@
+---
+title: "Model Building"
+output: html_document
+---
+
+## Setup and Data Splitting
+```{r setup, include=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(caret)
+library(glue)
+library(pROC)
+library(lubridate)
+library(here)
+library(gt)
+library(glmnet)
+```
+
+```{r}
+df = tibble()
+df_tree = tibble()
+for (season in seq(2003, 2021)) {
+  dfHold = read_csv(here(glue('data/input/CS/input_CS_{season}.csv')), show_col_types = FALSE)
+  df = rbind(df, dfHold)
+  
+  dfHold = read_csv(here(glue('data/input/lagged/input_lag_{season}.csv')), show_col_types = FALSE)
+  df_tree = rbind(df_tree, dfHold)
+}
+```
+
+```{r}
+df = df %>%
+      select(-c(game_id, teamID, teamGameNum, season,
+                teamID_opp, season_opp, teamGameNum_opp,
+                cum_oRebRate_opp, cum_dRebRate_opp,
+                cum_oRebRate_opp_opp, cum_dRebRate_opp_opp))
+
+df = df %>%
+    mutate(across(loc, as.factor),
+           across(win, as.factor),
+           across(btb, as.factor),
+           across(btb_opp, as.factor))
+
+df_tree = df_tree %>%
+      select(-c(game_id, teamID, teamGameNum, season,
+                teamID_opp, season_opp, teamGameNum_opp,
+                cum_oRebRate_opp, cum_dRebRate_opp,
+                cum_oRebRate_opp_opp, cum_dRebRate_opp_opp,
+                logTravelDist, logTravelDist_opp, gameNum, gameNum_opp,
+                daysSinceOpener, daysSinceOpener_opp))
+
+df_tree = df_tree %>%
+    mutate(across(loc, as.factor),
+           across(win, as.factor),
+           across(btb, as.factor),
+           across(btb_opp, as.factor))
+
+dfQuant = df %>%
+            select(loc, btb, btb_opp)
+
+dfQual = df %>%
+            select(-c(loc, btb, btb_opp, win))
+
+dfQuant_tree = df_tree %>%
+                 select(loc, btb, btb_opp)
+```
+
+```{r}
+dummysOut = dummyVars(~., data=dfQuant, fullRank = TRUE)
+dfDummies = predict(dummysOut, dfQuant)
+
+dummysOut_tree = dummyVars(~., data=dfQuant_tree, fullRank = TRUE)
+dfDummies_tree = predict(dummysOut_tree, dfQuant_tree)
+
+X = cbind(dfDummies, dfQual)
+Y = factor(df %>% select(win) %>% unlist(.), labels=c('loss', 'win'))
+Yrelevel = relevel(Y, ref='win')
+```
+
+```{r}
+caret.LogLoss = function(data, lev=NULL, model=NULL) {
+  yTrue = data %>% pull(obs)
+  winPct = data %>% pull(win)
+  actualWin = as.integer(relevel(yTrue, ref='loss')) - 1
+  
+  out = -sum((actualWin * log(winPct)) + ((1-actualWin) * log(1-winPct)))
+  N = length(yTrue)
+
+  out = out / N
+  names(out) = "LogLoss"
+  out
+}
+```
+
+
+```{r}
+set.seed(42)
+K = 10
+#trControl = trainControl(method='cv', number=K)
+trControl = trainControl(method='cv', number=K, classProbs = TRUE, summaryFunction = caret.LogLoss)
+trControl_tree = trainControl(method='cv', number=K, classProbs = TRUE, summaryFunction = caret.LogLoss)
+trainIndex = createDataPartition(Yrelevel, p=0.8, list=FALSE) %>% as.vector(.)
+
+Xtrain = X[trainIndex,]
+Ytrain = Yrelevel[trainIndex] %>% as.vector() %>% as.factor() %>% relevel(ref='win')
+
+Xtest = X[-trainIndex,]
+Ytest = Yrelevel[-trainIndex] %>% as.vector() %>% as.factor() %>% relevel(ref='win')
+
+X_tree = cbind(df_tree %>% select(-c(loc, btb, btb_opp, win)),
+               dfDummies_tree)
+Xtrain_tree = X_tree[trainIndex,]
+Xtest_tree = X_tree[-trainIndex,]
+
+Ytrain_tree = factor(df_tree[trainIndex,] %>% select(win) %>% unlist(.), labels=c('loss', 'win')) %>% relevel(ref='win')
+Ytest_tree = factor(df_tree[-trainIndex,] %>% select(win) %>% unlist(.), labels=c('loss', 'win')) %>% relevel(ref='win')
+```
+
+## Build GLM
+
+```{r}
+logisticOut = train(x=Xtrain, y=Ytrain, trControl=trControl, method='glm', metric="LogLoss")
+summary(logisticOut)
+```
+
+```{r}
+logprobs = predict(logisticOut, Xtest, type='prob')
+calibProbs = calibration(Ytest ~ logprobs$win, cuts=8)
+xyplot(calibProbs)
+```
+
+```{r}
+rocLog = roc(Ytest, logprobs$win)
+plot(rocLog, legacy.axes=TRUE)
+```
+
+## See if taking out WinPct affects anything
+```{r}
+XnoWinPct = X %>%
+             select(-contains('winPct'))
+
+XtrainNoWP = XnoWinPct[trainIndex,]
+
+XtestNoWP = XnoWinPct[-trainIndex,]
+
+logisticOutNoWP = train(x=XtrainNoWP, y=Ytrain, trControl=trControl, method='glm', metric='LogLoss')
+
+summary(logisticOutNoWP)
+```
+
+```{r}
+logprobsNoWP = predict(logisticOutNoWP, Xtest, type='prob')
+calibProbs = calibration(Ytest ~ logprobsNoWP$win, cuts=8)
+xyplot(calibProbs)
+```
+
+```{r}
+rocLogNoWP = roc(Ytest, logprobsNoWP$win)
+plot(rocLogNoWP, legacy.axes=TRUE)
+```
+
+## See how only WinPct and Loc do
+```{r}
+dfQuant = df %>% select(loc)
+dfQual = df %>% select(contains('winPct'))
+
+dummyOut = dummyVars(~., data=dfQuant, fullRank = TRUE)
+dfDummies = predict(dummyOut, dfQuant)
+
+X = cbind(dfDummies, dfQual)
+Xtrain = X[trainIndex,]
+Xtest = X[-trainIndex,]
+```
+
+```{r}
+logisticOutOnlyWP = train(x=Xtrain, y=Ytrain, trControl=trControl, method='glm', metric='LogLoss')
+probsWP = predict(logisticOutOnlyWP, Xtest, type='prob')
+summary(logisticOutOnlyWP)
+```
+
+```{r}
+logprobsWP = predict(logisticOutOnlyWP, Xtest, type='prob')
+calibProbs = calibration(Ytest ~ logprobsWP$win, cuts=8)
+xyplot(calibProbs)
+```
+
+```{r}
+rocLogWP = roc(Ytest, logprobsWP$win)
+plot(rocLogWP, legacy.axes=TRUE)
+```
+
+## Elastic Net
+
+```{r}
+dfQuant = df %>%
+            select(loc, btb, btb_opp)
+
+dfQual = df %>%
+            select(-c(loc, btb, btb_opp, win))
+
+dummysOut = dummyVars(~., data=dfQuant, fullRank = TRUE)
+dfDummies = predict(dummysOut, dfQuant)
+
+X = cbind(dfDummies, dfQual)
+Y = factor(df %>% select(win) %>% unlist(.), labels=c('loss', 'win'))
+Yrelevel = relevel(Y, ref='win')
+
+Xtrain = X[trainIndex,]
+Ytrain = Yrelevel[trainIndex]
+
+Xtest = X[-trainIndex,]
+Ytest = Yrelevel[-trainIndex]
+```
+
+```{r}
+tuneGrid = expand.grid('alpha' = c(0, .25, .5, .75, 1),
+                       'lambda' = seq(00, 0.001, length.out=30))
+
+elasticOut = train(x=Xtrain, y=Ytrain, method='glmnet',
+                   trControl=trControl, tuneGrid = tuneGrid,
+                   metric='LogLoss', maximize=FALSE)
+```
+
+```{r}
+alp = elasticOut$bestTune$alpha
+lam = elasticOut$bestTune$lambda
+
+glmnetOut = glmnet(x=Xtrain, y=Ytrain, alpha=alp,
+                   family='binomial', standardize=FALSE)
+
+coef(glmnetOut, s=lam)
+```
+
+```{r}
+probGLM = predict(glmnetOut, as.matrix(Xtest), s=lam, type='response') %>% as.vector(.)
+probGLM = tibble('loss' = probGLM)
+probGLM = probGLM %>%
+            mutate(win = 1-loss)
+```
+
+```{r}
+calibProbs = calibration(Ytest ~ probGLM$win, cuts=8)
+xyplot(calibProbs)
+```
+
+```{r}
+rocLogGLM = roc(Ytest, probGLM$win)
+plot(rocLogGLM, legacy.axes=TRUE)
+```
+
+
+## Boosted Tree
+```{r}
+tuneGrid = expand.grid('nrounds' = c(2500, 2750, 3000, 3250, 3500),
+                       'max_depth' = 3,
+                       'eta' = 0.01,
+                       'gamma' = 0,
+                       'colsample_bytree' = 1,
+                       'min_child_weight' = 0,
+                       'subsample' = 0.5)
+
+xgboost = train(x = Xtrain_tree,
+                y = Ytrain_tree,
+                method='xgbTree',
+                trControl = trControl_tree,
+                verbosity = 0, # to silence some weird deprecation errors
+                tuneGrid = tuneGrid,
+                maximize = FALSE,
+                metric = 'LogLoss')
+```
+
+```{r}
+xgbprobs = predict(xgboost, Xtest_tree, type='prob')
+calibProbs = calibration(Ytest_tree ~ xgbprobs$win, cuts=8)
+xyplot(calibProbs)
+```
+
+```{r}
+rocLogxgb = roc(Ytest_tree, xgbprobs$win)
+plot(rocLogxgb, legacy.axes=TRUE)
+```
+
+## Random Forest
+```{r}
+mtry = ceiling(sqrt(ncol(Xtrain_tree))) # mtry is approx sqrt(p) for classification
+
+rf = train(x = Xtrain_tree,
+                y = Ytrain_tree,
+                method='rf',
+                trControl = trControl_tree,
+                verbosity = 0, # to silence some weird deprecation errors
+                tuneGrid = data.frame('mtry' = mtry),
+                maximize = FALSE,
+                metric = 'LogLoss')
+```
+
+```{r}
+rfprobs = predict(rf, Xtest_tree, type='prob')
+calibProbs = calibration(Ytest_tree ~ rfprobs$win, cuts=8)
+xyplot(calibProbs)
+```
+
+```{r}
+rocLogrf = roc(Ytest_tree, rfprobs$win)
+plot(rocLogrf, legacy.axes=TRUE)
+```
+
+## Team Power Metric
+```{r}
+pca = prcomp(Xtrain %>% select(cum_winPct, cum_oRating_team, cum_dRating_team),
+             center = TRUE, scale = TRUE)
+
+teamskill1 = predict(pca, Xtrain %>% select(cum_winPct, cum_oRating_team, cum_dRating_team))[,1]
+teamskill2 = predict(pca, Xtrain %>% select(cum_winPct, cum_oRating_team, cum_dRating_team))[,2]
+oppskill1 = predict(pca, Xtrain %>% select(cum_winPct = cum_winPct_opp,
+                                          cum_oRating_team = cum_oRating_team_opp,
+                                          cum_dRating_team = cum_dRating_team_opp))[,1]
+oppskill2 = predict(pca, Xtrain %>% select(cum_winPct = cum_winPct_opp,
+                                          cum_oRating_team = cum_oRating_team_opp,
+                                          cum_dRating_team = cum_dRating_team_opp))[,2]
+```
+
+```{r}
+Xtrain$teamskill1 = teamskill1
+Xtrain$oppskill1 = oppskill1
+Xtrain$teamskill2 = teamskill2
+Xtrain$oppskill2 = oppskill2
+```
+
+```{r}
+Xtrain = Xtrain %>%
+                select(-c(contains("winPct"),
+                          contains("oRating"),
+                          contains('dRating'),
+                          contains('Travel')))
+```
+
+```{r}
+tuneGrid = expand.grid('alpha' = c(0, .25, .5, .75, 1),
+                       'lambda' = seq(00, 0.001, length.out=30))
+
+elasticOut_TeamPower = train(x=Xtrain, y=Ytrain, method='glmnet',
+                   trControl=trControl, tuneGrid = tuneGrid,
+                   metric='LogLoss', maximize=FALSE)
+```
+
+```{r}
+alp = elasticOut_TeamPower$bestTune$alpha
+lam = elasticOut_TeamPower$bestTune$lambda
+
+glmnetOut_TeamPower = glmnet(x=Xtrain, y=Ytrain, alpha=alp,
+                   family='binomial', standardize=FALSE)
+
+coef(glmnetOut_TeamPower, s=lam)
+```
+```{r}
+teamskill1 = predict(pca, Xtest %>% select(cum_winPct, cum_oRating_team, cum_dRating_team))[,1]
+teamskill2 = predict(pca, Xtest %>% select(cum_winPct, cum_oRating_team, cum_dRating_team))[,2]
+oppskill1 = predict(pca, Xtest %>% select(cum_winPct = cum_winPct_opp,
+                                          cum_oRating_team = cum_oRating_team_opp,
+                                          cum_dRating_team = cum_dRating_team_opp))[,1]
+oppskill2 = predict(pca, Xtest %>% select(cum_winPct = cum_winPct_opp,
+                                          cum_oRating_team = cum_oRating_team_opp,
+                                          cum_dRating_team = cum_dRating_team_opp))[,2]
+
+Xtest$teamskill1 = teamskill1
+Xtest$oppskill1 = oppskill1
+Xtest$teamskill2 = teamskill2
+Xtest$oppskill2 = oppskill2
+
+Xtest = Xtest %>%
+                select(-c(contains("winPct"),
+                          contains("oRating"),
+                          contains('dRating'),
+                          contains('Travel')))
+```
+
+
+```{r}
+probGLM_TeamPower = predict(glmnetOut_TeamPower, as.matrix(Xtest), s=lam, type='response') %>% as.vector(.)
+probGLM_TeamPower = tibble('loss' = probGLM_TeamPower)
+probGLM_TeamPower = probGLM_TeamPower %>%
+            mutate(win = 1-loss)
+```
+
+```{r}
+calibProbs = calibration(Ytest ~ probGLM_TeamPower$win, cuts=8)
+xyplot(calibProbs)
+```
+
+```{r}
+rocLogGLM_TeamPower = roc(Ytest, probGLM_TeamPower$win)
+plot(rocLogGLM_TeamPower, legacy.axes=TRUE)
+```
+
+
+## Comparing Models
+```{r}
+LogLoss = function(yPred, yTrue) {
+    df = cbind(yPred, actualWin=as.integer(relevel(yTrue, ref='loss'))-1)
+    df = df %>%
+           mutate(LogLoss = -((actualWin * log(win)) + ((1-actualWin) * log(1-win))))
+    N = nrow(df)
+
+    return(sum(df$LogLoss) / N)
+}
+```
+
+First, build a model that gives a 50% probability for all games:
+```{r}
+naiveModel = tibble('win' = rep(0.5, length(Ytest)),
+                     'loss' = rep(0.5, length(Ytest)))
+
+ll_naive = LogLoss(naiveModel, Ytest)
+
+rocNaive = roc(Ytest, naiveModel$win)
+auc_naive = rocNaive$auc
+```
+
+```{r}
+ll_LR = LogLoss(logprobs, Ytest)
+auc_LR = rocLog$auc
+
+ll_noWP = LogLoss(logprobsNoWP, Ytest)
+auc_noWP = rocLogNoWP$auc
+
+ll_WPonly = LogLoss(logprobsWP, Ytest)
+auc_WPonly = rocLogWP$auc
+
+ll_glm = LogLoss(probGLM, Ytest)
+auc_glm = rocLogGLM$auc
+
+ll_xgb = LogLoss(xgbprobs, Ytest_tree)
+auc_xgb = rocLogxgb$auc
+
+ll_rf = LogLoss(rfprobs, Ytest_tree)
+auc_rf = rocLogrf$auc
+
+ll_tp = LogLoss(probGLM_TeamPower, Ytest)
+auc_tp = rocLogGLM_TeamPower$auc
+
+gtdf = tibble('logloss' = c(ll_naive, ll_LR, ll_noWP, ll_WPonly,
+                            ll_glm, ll_xgb, ll_rf, ll_tp),
+              'auc' = c(auc_naive, auc_LR, auc_noWP, auc_WPonly,
+                        auc_glm, auc_xgb, auc_rf, auc_tp),
+              'model' = c('Naive', 'All Predictors', 'Win Percentage Removed',
+                          'Only Win Percentage and Location',
+                          'Elastic Net (All Predictors)', 'XGBoost',
+                          'Random Forest', 'Elastic Net (Team Power)'))
+
+gtdf %>%
+  arrange(logloss) %>%
+  gt(rowname_col = 'model') %>%
+  tab_header(title='Comparing Different Models') %>%
+  tab_stubhead(label='Model') %>%
+  fmt_number(columns=c('logloss', 'auc'), decimals=3) %>%
+  tab_options(heading.align='left') %>%
+  tab_style(style=cell_text(align='left'), locations=cells_stub())%>%
+  tab_style(style=cell_fill(color='lightblue'),
+            locations=cells_body(columns=logloss,
+                                 rows=logloss==min(logloss))) %>%
+  tab_style(style=cell_fill(color='lightblue'),
+            locations=cells_body(columns=auc,
+                                 rows=auc==max(auc))) %>%
+  cols_align(align='center', columns=c(logloss, auc)) %>%
+  cols_label(logloss = "Mean Log Loss", auc = "ROC AUC") 
+```
+
+
+## Plots
+```{r}
+ggplot(cbind(wl = Ytest_tree, xgbprobs), aes(x=win, y=after_stat(count), fill=wl)) +
+geom_density(alpha=0.5) +
+theme_minimal() +
+theme(legend.title=element_blank(),
+      legend.position='top') +
+labs(title='XGBoost Predictions')
+```
+
+```{r}
+ggplot(cbind(wl = Ytest, probGLM), aes(x=win, y=after_stat(count), fill=wl)) +
+geom_density(alpha=0.5) +
+theme_minimal() +
+theme(legend.title=element_blank(),
+      legend.position='top') +
+labs(title='GLM Predictions')
+```
+
+```{r}
+ggplot(cbind(wl = Ytest, logprobs), aes(x=win, y=after_stat(count), fill=wl)) +
+geom_density(alpha=0.5) +
+theme_minimal() +
+theme(legend.title=element_blank(),
+      legend.position='top') +
+labs(title='LR Predictions')
+```
+
+
+## Finalizing Model
+The XGBoost model has the best testing performance, so it will be retrained with the best tune values found in the training set.
+
+```{r}
+trControl_final = trainControl(method='cv', number=5, classProbs = TRUE, summaryFunction = caret.LogLoss)
+xgboostFinal = train(x = X_tree,
+                     y = factor(df_tree %>%
+                                  select(win) %>%
+                                  unlist(.),
+                                labels=c('loss', 'win')) %>%
+                       relevel(ref='win'),
+                     tuneGrid = xgboost$bestTune,
+                     method='xgbTree',
+                     trControl = trControl_final,
+                     verbosity = 0, # to silence some weird deprecation errors
+                     maximize = FALSE,
+                     metric = 'LogLoss')
+```
+
+```{r}
+saveRDS(xgboostFinal, file=here('models/finalModel.rds'))
+```
+
+

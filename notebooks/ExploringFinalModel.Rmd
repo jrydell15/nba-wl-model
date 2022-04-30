@@ -1,0 +1,92 @@
+---
+title: "Exploring Final Model"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(caret)
+library(glue)
+library(here)
+library(gt)
+```
+
+## Loading Model
+```{r}
+finalModel = readRDS(here('./models/finalModel.rds'))
+```
+
+## Getting 2022 test set data
+```{r}
+df = read_csv(here('data/input/lagged/input_lag_2022.csv'))
+
+df = df %>%
+  select(-c(game_id, teamID, teamGameNum, season,
+                teamID_opp, season_opp, teamGameNum_opp,
+                cum_oRebRate_opp, cum_dRebRate_opp,
+                cum_oRebRate_opp_opp, cum_dRebRate_opp_opp,
+                logTravelDist, logTravelDist_opp, gameNum, gameNum_opp,
+                daysSinceOpener, daysSinceOpener_opp)) %>%
+  mutate(across(loc, as.factor),
+           across(win, as.factor),
+           across(btb, as.factor),
+           across(btb_opp, as.factor))
+
+XQuant = df %>%
+  select(loc, btb, btb_opp)
+
+XQual = df %>%
+  select(-c(loc, btb, btb_opp, win))
+
+dummyModel = dummyVars(~., data=XQuant, fullRank=TRUE)
+Xdummies = predict(dummyModel, XQuant)
+
+X = cbind(XQual, Xdummies)
+
+Y = factor(df %>%
+             select(win) %>%
+             unlist(.),
+           labels=c('loss', 'win')) %>%
+  relevel(ref='win')
+```
+
+## Variable Importance
+```{r}
+library(vip)
+
+vip(finalModel, num_features = ncol(X))
+```
+
+```{r}
+LogLoss = function(yPred, yTrue) {
+    df = cbind(yPred, actualWin=as.integer(relevel(yTrue, ref='loss'))-1)
+    df = df %>%
+           mutate(LogLoss = -((actualWin * log(win)) + ((1-actualWin) * log(1-win))))
+    N = nrow(df)
+
+    return(sum(df$LogLoss) / N)
+}
+```
+
+```{r}
+Yhat = predict(finalModel, X, type='prob')
+
+LogLoss(Yhat, Y)
+```
+
+```{r}
+xgbprobs = predict(finalModel, X, type='prob')
+calibProbs = calibration(Y ~ xgbprobs$win, cuts=5)
+xyplot(calibProbs)
+```
+Although the Log Loss value looks good in comparison with what was seen during training, the model routinely underestimates the probabilities for the 2022 season. This could be simply an artifact of it being such a smaller set (~1250 games) when compared to the training set, meaning that the probabilites just haven't had time to converge on their true probabilities yet.
+
+```{r}
+ggplot(cbind(wl = Y, xgbprobs), aes(x=win, y=after_stat(count), fill=wl)) +
+geom_density(alpha=0.5) +
+theme_minimal() +
+theme(legend.title=element_blank(),
+      legend.position='top') +
+labs(title='XGBoost Predictions')
+```
