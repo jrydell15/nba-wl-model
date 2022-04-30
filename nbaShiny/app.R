@@ -2,7 +2,11 @@ library(shiny)
 library(hoopR)
 library(tidyverse)
 library(DT)
-lastDay = read_csv('./data/input.csv')
+library(caret)
+library(gt)
+library(xgboost)
+
+lastDay = read_csv('./data/input.csv', show_col_types = FALSE)
 model = readRDS('./finalModel.rds')
 
 lastDate = max(lastDay$date)
@@ -123,7 +127,10 @@ ui <- fluidPage(
               column(12,
                      selectInput(inputId = 'homeTeam',
                                  label = '',
-                                 choices = lastDay %>% pull(display_name) %>% unique(),
+                                 choices = lastDay %>%
+                                   pull(display_name) %>%
+                                   unique() %>%
+                                   sort(),
                                  selected = "Houston Rockets"))
                     ),
             fluidRow(
@@ -148,7 +155,10 @@ ui <- fluidPage(
                  column(12,
                         selectInput(inputId = 'awayTeam',
                                     label = '',
-                                    choices = lastDay %>% pull(display_name) %>% unique(),
+                                    choices = lastDay %>%
+                                      pull(display_name) %>%
+                                      unique() %>%
+                                      sort(),
                                     selected = 'Dallas Mavericks'))
                ),
                fluidRow(
