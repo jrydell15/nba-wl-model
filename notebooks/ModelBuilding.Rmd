@@ -500,6 +500,8 @@ labs(title='LR Predictions')
 The XGBoost model has the best testing performance, so it will be retrained with the best tune values found in the training set.
 
 ```{r}
+if (!file.exists(here('models/finalModel.rds'))) {
+  
 trControl_final = trainControl(method='cv', number=5, classProbs = TRUE, summaryFunction = caret.LogLoss)
 xgboostFinal = train(x = X_tree,
                      y = factor(df_tree %>%
@@ -513,10 +515,9 @@ xgboostFinal = train(x = X_tree,
                      verbosity = 0, # to silence some weird deprecation errors
                      maximize = FALSE,
                      metric = 'LogLoss')
-```
 
-```{r}
 saveRDS(xgboostFinal, file=here('models/finalModel.rds'))
+}
 ```
 
 

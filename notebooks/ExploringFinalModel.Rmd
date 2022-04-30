@@ -55,7 +55,8 @@ Y = factor(df %>%
 ```{r}
 library(vip)
 
-vip(finalModel, num_features = ncol(X))
+vip(finalModel, num_features = ncol(X)) +
+  theme_minimal()
 ```
 
 ```{r}
@@ -80,7 +81,8 @@ xgbprobs = predict(finalModel, X, type='prob')
 calibProbs = calibration(Y ~ xgbprobs$win, cuts=5)
 xyplot(calibProbs)
 ```
-Although the Log Loss value looks good in comparison with what was seen during training, the model routinely underestimates the probabilities for the 2022 season. This could be simply an artifact of it being such a smaller set (~1250 games) when compared to the training set, meaning that the probabilites just haven't had time to converge on their true probabilities yet.
+
+Although the Log Loss value looks good in comparison with what was seen during training, the model routinely underestimates the probabilities for the 2022 season. This could be simply an artifact of it being such a smaller set (~1250 games) when compared to the training set, meaning that the probabilties just haven't had time to converge on their true probabilities yet.
 
 ```{r}
 ggplot(cbind(wl = Y, xgbprobs), aes(x=win, y=after_stat(count), fill=wl)) +
