@@ -39,7 +39,11 @@ getGTTable = function(team) {
     pivot_wider(id_cols = fixedName, names_from = type, values_from = Raw) %>%
     left_join(lastDay %>%
                 mutate(across(c(cum_oRating_team, contains("_team")), ~rank(-.), .names="{col}_rank"),
-                       across(c(cum_dRating_team, contains("_opp")), ~rank(.), .names="{col}_rank")) %>%
+                       across(c(cum_dRating_team, contains("_opp")), ~rank(.), .names="{col}_rank"),
+                       cum_stealRate_team_rank = rank(cum_stealRate_team),
+                       cum_stealRate_opp_rank = rank(-cum_stealRate_opp),
+                       cum_blockRate_team_rank = rank(cum_blockRate_team),
+                       cum_blockRate_opp_rank = rank(-cum_blockRate_opp)) %>%
                 filter(display_name == team) %>%
                 select(contains("_rank")) %>%
                 pivot_longer(cols=contains("_rank"), names_to='Stat', values_to='Rank') %>%
@@ -91,7 +95,11 @@ getGTTable = function(team) {
         subtitle = paste0('As of ', lastDate, ' (Garbage Time Removed)')
       ) %>%
       opt_align_table_header(align = 'left') %>%
-      tab_source_note(source_note = 'Data: hoopR'))
+      tab_source_note(source_note = 'Data: hoopR') %>%
+      tab_footnote(footnote='Offensive: get blocked, defensive: got a block',
+                   locations = cells_stub(rows="Block Rate")) %>%
+      tab_footnote(footnote='Offensive: ball stolen from you, defensive: got a steal',
+                                  locations = cells_stub(rows="Steal Rate")))
 }
 
 buildInputFrame = function(team1, team2, homeRest, awayRest, homeBTB, awayBTB) {
